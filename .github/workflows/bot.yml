@@ -53,53 +53,50 @@ jobs:
 
           print(f"=== Action: {action} ===")
 
-          # 1. Health check
           def health_check():
               r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": "Reply with OK"}], "max_tokens": 100, "temperature": 0}, timeout=30)
+                  json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "Reply with OK"}], "max_tokens": 20, "temperature": 0}, timeout=30)
               data = r.json()
               msg = (data.get("choices") or [{}])[0].get("message") or {}
-              final = (msg.get("content") or msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
-              print(f"GROQ: {'PASS' if final else 'FAIL'} - {final}")
+              final = (msg.get("content") or "").strip()
+              print(f"GROQ: {'PASS' if final else 'FAIL'} - {final} - Model: llama-3.3-70b-versatile")
               rf = requests.get(f"https://graph.facebook.com/{version}/{page_id}", params={"fields": "id,name", "access_token": page_token}, timeout=25)
               print(f"FACEBOOK: {'PASS' if rf.ok else 'FAIL'} - {rf.json()}")
               return True
 
-          # 2. Generate and Post
           def create_post():
-              topics = ["customer satisfaction", "relationship advice", "self love", "life motivation", "real love quotes"]
+              topics = ["customer satisfaction is real love", "self love and healing", "loyalty and trust", "gratitude for customers"]
               topic = random.choice(topics)
-              prompt = f"Write a short, viral Facebook post about {topic}. Keep it under 40 words, emotional, relatable, with 2-3 emojis and 2 hashtags. No intro like 'Here is'."
+              prompt = f"Write a Facebook post about {topic}. Under 35 words, emotional, human, 2 emojis, 2 hashtags. Output ONLY the post."
 
               r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 200, "temperature": 0.9}, timeout=30)
+                  json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": "Output ONLY the final post, no explanation."}, {"role": "user", "content": prompt}], "max_tokens": 120, "temperature": 0.9}, timeout=30)
               
               data = r.json()
               msg = (data.get("choices") or [{}])[0].get("message") or {}
-              content = (msg.get("content") or msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
-
-              # Clean reasoning model artifacts
-              if "final:" in content.lower():
-                  content = content.split("final:")[-1].strip()
-              content = content.replace('"', '').strip()
+              content = (msg.get("content") or "").strip().strip('"').strip("'")
 
               if not content:
                   print(f"Failed to generate: {data}")
                   return
 
-              print(f"Generated: {content}")
+              # BLOCK reasoning leak - never post if leak detected
+              if any(x in content.lower() for x in ["we need to", "let's craft", "viral facebook post", "as an ai"]):
+                  print(f"BLOCKED LEAK: {content}")
+                  return
 
-              # Post to Facebook
+              print(f"Generated CLEAN: {content}")
+
               pr = requests.post(f"https://graph.facebook.com/{version}/{page_id}/feed",
                   data={"message": content, "access_token": page_token}, timeout=25)
               
               print(f"FB POST RESPONSE: {pr.status_code} - {pr.json()}")
               if pr.ok:
-                  print("SUCCESS: Posted to REAL satisfaction page!")
+                  print("SUCCESS: Posted clean to REAL satisfaction page!")
               else:
-                  print("FAILED to post - check permissions")
+                  print("FAILED to post")
 
           if action == "health_check":
               health_check()
