@@ -1,0 +1,65 @@
+name: RealSatisfaction AI Automation Scheduler
+
+on:
+  schedule:
+    # Runs every 3 hours UTC (00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC)
+    # Corresponding to 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00, 00:00 East Africa Time (EAT, UTC+3)
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Manual Trigger Action (health_check, draft_post, or sync_comments)'
+        required: true
+        default: 'health_check'
+        type: choice
+        options:
+          - health_check
+          - draft_post
+          - sync_comments
+
+concurrency:
+  group: realsatisfaction-bot
+  cancel-in-progress: false
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: System Health & Execution Check
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v20.0' }}
+          TRIGGER_ACTION: ${{ github.event.inputs.action || 'schedule_tick' }}
+        run: |
+          echo "=============================================="
+          echo "RealSatisfaction AI - Kisumu, Kenya"
+          echo "Automation Trigger: $TRIGGER_ACTION"
+          echo "Timestamp (UTC): $(date -u)"
+          echo "Timestamp (EAT): $(TZ='Africa/Nairobi' date)"
+          echo "=============================================="
+
+          # Verify credentials presence without leaking values
+          if [ -z "$FB_PAGE_ACCESS_TOKEN" ] || [ -z "$FB_PAGE_ID" ]; then
+            echo "⚠️ Notice: FB_PAGE_ACCESS_TOKEN or FB_PAGE_ID not set in GitHub repository secrets."
+            echo "Please configure them under: Settings > Secrets and variables > Actions"
+          else
+            echo "✅ Facebook credentials configured in GitHub Secrets."
+          fi
+
+          if [ -z "$GROQ_API_KEY" ]; then
+            echo "⚠️ Notice: GROQ_API_KEY not set in GitHub repository secrets."
+          else
+            echo "✅ Groq AI API key configured in GitHub Secrets."
+          fi

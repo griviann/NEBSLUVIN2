@@ -1,0 +1,6 @@
+{
+  "name": "RealSatisfaction AI",
+  "description": "AI-powered social media manager for Facebook Pages in Kisumu, Kenya, supporting English and Kiswahili.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
