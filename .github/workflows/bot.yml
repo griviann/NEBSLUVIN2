@@ -3,11 +3,15 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '15 17 * * *'
+permissions:
+  contents: write
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -18,16 +22,18 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          import os, requests, re, json, random
+          import os, requests, re, json, random, subprocess
           gk=os.getenv("GROQ_API_KEY")
           pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
           pid=os.getenv("FB_PAGE_ID")
+          gh=os.getenv("GH_TOKEN")
           mem_file="replied_comments.json"
           learn_file="learned_topics.json"
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Warm, mature, healer, positive societal impact. Never reveal reasoning. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
+          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Warm, mature, healer, positive societal impact. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
           def ask(sys, usr):
             try:
               r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":150},timeout=40)
@@ -37,8 +43,7 @@ jobs:
               if any(w in final.lower() for w in ["theme:","output only","system prompt","word count"]): return ""
               return final
             except Exception as e:
-              print(f"groq err {e}")
-              return ""
+              print(f"groq err {e}"); return ""
           def research_topic():
             topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
             avail=[t for t in topics if t not in learned[-5:]]
@@ -64,8 +69,16 @@ jobs:
             topic=research_topic()
             print(f"Researching: {topic}")
             post=ask(SYSTEM, f"Create Facebook post about {topic}. Positive societal impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.")
+            print(f"Generated post: {post}")
             if post:
               fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post,"access_token":pt}).json()
-              print(f"Posted: {post} -> {fb}")
+              print(f"Posted to FB: {fb}")
           except Exception as e: print(f"post err {e}")
-          os.system(f"git config user.name 'bot' && git config user.email 'bot@real.local' && git add {mem_file} {learn_file} && git commit -m 'V15 success' || true && git push || true")
+          try:
+            subprocess.run(["git","config","user.name","bot"],check=True)
+            subprocess.run(["git","config","user.email","bot@real.local"],check=True)
+            subprocess.run(["git","add",mem_file,learn_file],check=True)
+            subprocess.run(["git","commit","-m","V15 learning"],check=True)
+            subprocess.run(["git","push",f"https://x-access-token:{gh}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git","HEAD:main"],check=True)
+            print("Memory saved to GitHub")
+          except Exception as e: print(f"git push info: {e}")
