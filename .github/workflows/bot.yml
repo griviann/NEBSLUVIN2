@@ -13,6 +13,7 @@ jobs:
           python-version: '3.11'
       - run: pip install requests
       - name: V15 REPLICA THINKING BOT
+        shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
@@ -26,30 +27,26 @@ jobs:
           learn_file="learned_topics.json"
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Personality: Warm, mature, healer, positive societal impact. Never reveal reasoning. Never say Theme, Output Only. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
-          def ask(system, user):
+          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Warm, mature, healer, positive societal impact. Never reveal reasoning. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
+          def ask(sys, usr):
             try:
-              r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":system},{"role":"user","content":user}],"max_tokens":150},timeout=40)
+              r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":150},timeout=40)
               content=r.json()["choices"][0]["message"].get("content","")
               m=re.search(r'"([^"]{15,320})"',content,re.DOTALL)
               final=m.group(1).strip() if m else ""
-              if any(w in final.lower() for w in ["theme:","output only","as an ai","system prompt","word count"]): return ""
+              if any(w in final.lower() for w in ["theme:","output only","system prompt","word count"]): return ""
               return final
-            except: return ""
+            except Exception as e:
+              print(f"groq err {e}")
+              return ""
           def research_topic():
-            topics=["why kindness is revolutionary in hate-filled world","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive not laziness","empathy listening to understand"]
+            topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
             avail=[t for t in topics if t not in learned[-5:]]
             chosen=random.choice(avail or topics)
             learned.append(chosen)
             if len(learned)>30: learned.pop(0)
-            json.dump(learned, open(learn_file,"w"))
+            open(learn_file,"w").write(json.dumps(learned))
             return chosen
-          def understand_intent(c):
-            c=c.lower()
-            if any(w in c for w in ["hello","hi","hey","sasa"]): return "greeting needs warm welcome"
-            if any(w in c for w in ["sad","tired","broken","hurt","depressed"]): return "someone hurting needs healing"
-            if any(w in c for w in ["angry","hate","mad"]): return "someone angry needs empathy"
-            return "general comment needs kindness"
           try:
             posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts?fields=id&limit=2&access_token={pt}").json().get("data",[])
             for p in posts:
@@ -57,18 +54,18 @@ jobs:
               for c in coms:
                 cid=c["id"]
                 if cid in memory or c.get("from",{}).get("id")==pid: continue
-                intent=understand_intent(c.get("message",""))
-                reply=ask(SYSTEM, f"User said '{c.get('message','')[:80]}'. Intent: {intent}. Reply empathy positive impact 20 words emoji question inside quotes.")
+                reply=ask(SYSTEM, f"User said '{c.get('message','')[:80]}'. Reply empathy positive impact 20 words emoji question inside quotes.")
                 if reply:
                   requests.post(f"https://graph.facebook.com/v20.0/{cid}/comments",data={"message":reply,"access_token":pt})
                   memory.append(cid)
-            json.dump(memory, open(mem_file,"w"))
-          except Exception as e: print(e)
+            open(mem_file,"w").write(json.dumps(memory))
+          except Exception as e: print(f"reply err {e}")
           try:
             topic=research_topic()
+            print(f"Researching: {topic}")
             post=ask(SYSTEM, f"Create Facebook post about {topic}. Positive societal impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.")
             if post:
               fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post,"access_token":pt}).json()
-              print(f"Posted {post}")
-          except Exception as e: print(e)
-          os.system(f"git config user.name 'bot' && git config user.email 'bot@real.local' && git add {mem_file} {learn_file} && git commit -m 'V15 fix' || true && git push || true")
+              print(f"Posted: {post} -> {fb}")
+          except Exception as e: print(f"post err {e}")
+          os.system(f"git config user.name 'bot' && git config user.email 'bot@real.local' && git add {mem_file} {learn_file} && git commit -m 'V15 success' || true && git push || true")
