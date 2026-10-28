@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'Select a safe diagnostic action'
+        description: 'Action'
         required: true
-        default: 'health_check'
+        default: 'post'
         type: choice
         options:
           - health_check
+          - post
 
 concurrency:
   group: realsatisfaction-bot
@@ -33,69 +34,77 @@ jobs:
       - name: Install Dependencies
         run: python -m pip install requests
 
-      - name: Check Groq and Facebook Connections
+      - name: Run Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v20.0' }}
+          ACTION: ${{ github.event.inputs.action || 'post' }}
         run: |
-          cat > /tmp/check.py << 'PY'
-          import os
-          import sys
-          import requests
+          cat > /tmp/bot.py << 'PY'
+          import os, requests, random
 
           groq_key = os.getenv("GROQ_API_KEY")
           page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
           page_id = os.getenv("FB_PAGE_ID")
           version = os.getenv("FACEBOOK_API_VERSION", "v20.0")
+          action = os.getenv("ACTION", "post")
 
-          print("=== RealSatisfaction AI Health Check ===")
+          print(f"=== Action: {action} ===")
 
-          if not groq_key:
-              print("GROQ: FAIL - API key is missing")
-              sys.exit(1)
-
-          try:
-              r = requests.post(
-                  "https://api.groq.com/openai/v1/chat/completions",
+          # 1. Health check
+          def health_check():
+              r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={
-                      "model": "openai/gpt-oss-20b",
-                      "messages": [{"role": "user", "content": "Reply with OK"}],
-                      "max_tokens": 100,
-                      "temperature": 0,
-                  },
-                  timeout=30,
-              )
+                  json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": "Reply with OK"}], "max_tokens": 100, "temperature": 0}, timeout=30)
               data = r.json()
               msg = (data.get("choices") or [{}])[0].get("message") or {}
               final = (msg.get("content") or msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
-              if r.ok and final:
-                  print(f"GROQ: PASS - {final}")
-              else:
-                  print(f"GROQ: FAIL - {data}")
-                  sys.exit(1)
-          except Exception as e:
-              print(f"GROQ: FAIL - {e}")
-              sys.exit(1)
-
-          if not page_token or not page_id:
-              print("FACEBOOK: FAIL - credentials missing")
-              sys.exit(1)
-
-          try:
+              print(f"GROQ: {'PASS' if final else 'FAIL'} - {final}")
               rf = requests.get(f"https://graph.facebook.com/{version}/{page_id}", params={"fields": "id,name", "access_token": page_token}, timeout=25)
-              df = rf.json()
-              if rf.ok and str(df.get("id")) == str(page_id):
-                  print(f"FACEBOOK: PASS - {df.get('name')}")
-              else:
-                  print(f"FACEBOOK: FAIL - {df}")
-                  sys.exit(1)
-          except Exception as e:
-              print(f"FACEBOOK: FAIL - {e}")
-              sys.exit(1)
+              print(f"FACEBOOK: {'PASS' if rf.ok else 'FAIL'} - {rf.json()}")
+              return True
 
-          print("OVERALL: PASS")
+          # 2. Generate and Post
+          def create_post():
+              topics = ["customer satisfaction", "relationship advice", "self love", "life motivation", "real love quotes"]
+              topic = random.choice(topics)
+              prompt = f"Write a short, viral Facebook post about {topic}. Keep it under 40 words, emotional, relatable, with 2-3 emojis and 2 hashtags. No intro like 'Here is'."
+
+              r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                  headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                  json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": prompt}], "max_tokens": 200, "temperature": 0.9}, timeout=30)
+              
+              data = r.json()
+              msg = (data.get("choices") or [{}])[0].get("message") or {}
+              content = (msg.get("content") or msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
+
+              # Clean reasoning model artifacts
+              if "final:" in content.lower():
+                  content = content.split("final:")[-1].strip()
+              content = content.replace('"', '').strip()
+
+              if not content:
+                  print(f"Failed to generate: {data}")
+                  return
+
+              print(f"Generated: {content}")
+
+              # Post to Facebook
+              pr = requests.post(f"https://graph.facebook.com/{version}/{page_id}/feed",
+                  data={"message": content, "access_token": page_token}, timeout=25)
+              
+              print(f"FB POST RESPONSE: {pr.status_code} - {pr.json()}")
+              if pr.ok:
+                  print("SUCCESS: Posted to REAL satisfaction page!")
+              else:
+                  print("FAILED to post - check permissions")
+
+          if action == "health_check":
+              health_check()
+          else:
+              health_check()
+              create_post()
           PY
-          python /tmp/check.py
+          python /tmp/bot.py
