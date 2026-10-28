@@ -1,56 +1,38 @@
+name: bot
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */3 * * *'
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
       - name: Run Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v20.0' }}
-          ACTION: ${{ github.event.inputs.action || 'post' }}
         run: |
-          cat > /tmp/bot.py << 'PY'
-          import os, requests, random, re
-          groq_key = os.getenv("GROQ_API_KEY")
-          page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
-          page_id = os.getenv("FB_PAGE_ID")
-          version = os.getenv("FACEBOOK_API_VERSION", "v20.0")
-
-          def clean_post(text):
-              # Take only first line/paragraph before reasoning artifacts
-              text = text.strip()
-              # Remove everything after these markers
-              for marker in ["\nCount words", "Count words:", "So 18 words", "within limit", "Good."]:
-                  if marker.lower() in text.lower():
-                      text = text.split(marker)[0] if marker in text else text.lower().split(marker.lower())[0]
-              # Remove quotes, newlines, extra counting
-              text = text.split("\n")[0].strip()
-              text = text.strip('"').strip("'")
-              # Remove word counts like (1) the2
-              text = re.sub(r'\(\d+\)', '', text)
-              text = re.sub(r'\b\w+\d+\b', '', text)  # removes the2, moments4
-              text = re.sub(r'\s+', ' ', text).strip()
-              return text
-
-          r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-              headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-              json={
-                  "model": "openai/gpt-oss-20b",
-                  "messages": [
-                      {"role": "system", "content": "You are Facebook writer. Output ONLY the final Facebook post in one line. No word counting, no explanation, no reasoning. Just the post."},
-                      {"role": "user", "content": "Write a Facebook post about self love healing. Under 25 words, emotional, 2 emojis max, 2 hashtags max. One line only."}
-                  ],
-                  "max_tokens": 80,
-                  "temperature": 0.8
-              }, timeout=30)
-          data = r.json()
-          raw = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-          print(f"RAW: {raw}")
-          cleaned = clean_post(raw)
-          print(f"CLEAN: {cleaned}")
-
-          if len(cleaned) < 10 or "count" in cleaned.lower():
-              print("Still dirty, abort")
-              exit(0)
-
-          pr = requests.post(f"https://graph.facebook.com/{version}/{page_id}/feed", data={"message": cleaned, "access_token": page_token}, timeout=25)
-          print(f"FB: {pr.status_code} - {pr.json()}")
+          python - << 'PY'
+          import os,requests,re
+          gk=os.getenv("GROQ_API_KEY")
+          pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
+          pid=os.getenv("FB_PAGE_ID")
+          def clean(t):
+              t=t.split("\n")[0]
+              t=re.sub(r'\(\d+\)','',t)
+              t=re.sub(r'\b\w+\d+\b','',t)
+              return t.strip(' "\'')
+          r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":"Output ONLY one line Facebook post."},{"role":"user","content":"Write Facebook post about self love healing, under 20 words, 2 emojis, 2 hashtags, one line only."}],"max_tokens":60,"temperature":0.8},timeout=30)
+          raw=r.json()["choices"][0]["message"]["content"]
+          print(f"RAW:{raw}")
+          post=clean(raw)
+          if "Count" in post: post=post.split("Count")[0]
+          print(f"CLEAN:{post}")
+          requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post,"access_token":pt})
           PY
-          python /tmp/bot.py
