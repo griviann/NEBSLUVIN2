@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V15 REPLICA THINKING BOT
+      - name: V16 REAL AI
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -30,29 +30,21 @@ jobs:
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
           
-          # HUMAN FALLBACK BANK - like me when AI fails
-          FALLBACK=[
-            "Rest is not laziness, it is how your soul heals and rebuilds strength. 🌿 When did you last allow yourself to truly rest?",
-            "Kindness costs nothing but leaves healing everywhere it touches. 💛 Who can you show unexpected kindness to today?",
-            "Setting boundaries is not selfish, it is how you protect your peace. 🌸 What boundary do you need to honor today?",
-            "You are not behind in life, you are on your own sacred timing. 🌱 What if your journey is unfolding exactly as it should?",
-            "Empathy is listening to understand, not to reply. 🤝 Who needs you to really hear them today?"
-          ]
-          
-          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Warm, mature, healer. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
-          def ask(sys, usr):
+          SYSTEM="You are REAL Satisfaction AI. Warm mature healer. Answer inside double quotes only, 18-24 words, 1-2 emojis, ends with question."
+          def ask(sys, usr, model):
             try:
-              r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":150},timeout=40)
+              r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":model,"messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":300},timeout=40)
               j=r.json()
-              print(f"Groq raw: {str(j)[:300]}")
-              content=j["choices"][0]["message"].get("content","")
-              m=re.search(r'"([^"]{10,400})"',content,re.DOTALL)
-              final=m.group(1).strip() if m else content.strip()[:300]
-              if len(final)<10: return ""
-              if any(w in final.lower() for w in ["theme:","output only","system prompt","word count"]): return ""
+              msg=j["choices"][0]["message"]
+              # FIX: read content OR reasoning OR content from reasoning field
+              raw = msg.get("content") or msg.get("reasoning") or ""
+              print(f"RAW from {model}: {raw[:400]}")
+              m=re.search(r'"([^"]{10,400})"',raw,re.DOTALL)
+              final=m.group(1).strip() if m else raw.strip()[:350]
+              if len(final)<15: return ""
               return final
             except Exception as e:
-              print(f"groq err {e}"); return ""
+              print(f"err {model}: {e}"); return ""
           
           def research_topic():
             topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
@@ -63,23 +55,13 @@ jobs:
             open(learn_file,"w").write(json.dumps(learned))
             return chosen
           
-          post_text=""
           topic=research_topic()
           print(f"Researching: {topic}")
-          ai_post=ask(SYSTEM, f"Create Facebook post about {topic}. Positive societal impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.")
-          print(f"AI Generated: {ai_post}")
-          post_text=ai_post if ai_post and len(ai_post)>15 else random.choice(FALLBACK)
-          print(f"Final post to use: {post_text}")
-          if post_text:
-            fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post_text,"access_token":pt}).json()
-            print(f"FB Result: {fb}")
+          # Try new model first, then old model with reasoning fix
+          post_text = ask(SYSTEM, f"Create Facebook post about {topic}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "llama-3.1-8b-instant")
+          if not post_text:
+            post_text = ask(SYSTEM, f"Create Facebook post about {topic}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "openai/gpt-oss-20b")
           
-          try:
-            open(mem_file,"w").write(json.dumps(memory))
-            subprocess.run(["git","config","user.name","bot"],check=True)
-            subprocess.run(["git","config","user.email","bot@real.local"],check=True)
-            subprocess.run(["git","add",mem_file,learn_file],check=True)
-            subprocess.run(["git","commit","-m","V15 learning"],check=True)
-            subprocess.run(["git","push",f"https://x-access-token:{gh}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git","HEAD:main"],check=True)
-            print("Memory saved")
-          except Exception as e: print(f"git info: {e}")
+          print(f"FINAL REAL AI POST: {post_text}")
+          if post_text and len(post_text)>15:
+            fb=requests.post(f"https
