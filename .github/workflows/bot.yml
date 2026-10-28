@@ -1,21 +1,19 @@
+
 name: RealSatisfaction AI Automation Scheduler
 
 on:
   schedule:
-    # Runs every 3 hours UTC (00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC)
-    # Corresponding to 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00, 00:00 East Africa Time (EAT, UTC+3)
     - cron: '0 */3 * * *'
+
   workflow_dispatch:
     inputs:
       action:
-        description: 'Manual Trigger Action (health_check, draft_post, or sync_comments)'
+        description: 'Select a safe diagnostic action'
         required: true
         default: 'health_check'
         type: choice
         options:
           - health_check
-          - draft_post
-          - sync_comments
 
 concurrency:
   group: realsatisfaction-bot
@@ -24,7 +22,7 @@ concurrency:
 jobs:
   run-automation:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
 
     steps:
       - name: Checkout Repository
@@ -35,31 +33,109 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: System Health & Execution Check
+      - name: Install Dependencies
+        run: python -m pip install requests
+
+      - name: Check Groq and Facebook Connections
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v20.0' }}
-          TRIGGER_ACTION: ${{ github.event.inputs.action || 'schedule_tick' }}
+          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v26.0' }}
         run: |
-          echo "=============================================="
-          echo "RealSatisfaction AI - Kisumu, Kenya"
-          echo "Automation Trigger: $TRIGGER_ACTION"
-          echo "Timestamp (UTC): $(date -u)"
-          echo "Timestamp (EAT): $(TZ='Africa/Nairobi' date)"
-          echo "=============================================="
+          python - <<'PY'
+          import os
+          import sys
+          import requests
 
-          # Verify credentials presence without leaking values
-          if [ -z "$FB_PAGE_ACCESS_TOKEN" ] || [ -z "$FB_PAGE_ID" ]; then
-            echo "⚠️ Notice: FB_PAGE_ACCESS_TOKEN or FB_PAGE_ID not set in GitHub repository secrets."
-            echo "Please configure them under: Settings > Secrets and variables > Actions"
-          else
-            echo "✅ Facebook credentials configured in GitHub Secrets."
-          fi
+          groq_key = os.getenv("GROQ_API_KEY")
+          page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
+          page_id = os.getenv("FB_PAGE_ID")
+          version = os.getenv("FACEBOOK_API_VERSION", "v26.0")
 
-          if [ -z "$GROQ_API_KEY" ]; then
-            echo "⚠️ Notice: GROQ_API_KEY not set in GitHub repository secrets."
-          else
-            echo "✅ Groq AI API key configured in GitHub Secrets."
-          fi
+          results = {}
+
+          print("=== RealSatisfaction AI Health Check ===")
+
+          # Test Groq using a minimal request.
+          if not groq_key:
+              results["GROQ"] = False
+              print("GROQ: FAIL - API key is missing")
+          else:
+              try:
+                  response = requests.post(
+                      "https://api.groq.com/openai/v1/chat/completions",
+                      headers={
+                          "Authorization": f"Bearer {groq_key}",
+                          "Content-Type": "application/json",
+                      },
+                      json={
+                          "model": "llama-3.3-70b-versatile",
+                          "messages": [
+                              {"role": "user", "content": "Reply with OK"}
+                          ],
+                          "max_tokens": 5,
+                          "temperature": 0,
+                      },
+                      timeout=25,
+                  )
+                  data = response.json()
+                  ok = (
+                      response.ok
+                      and bool(data.get("choices"))
+                      and bool(data["choices"][0].get("message", {}).get("content", "").strip())
+                  )
+                  results["GROQ"] = ok
+                  print(
+                      "GROQ: " + ("PASS - AI response received" if ok
+                      else f"FAIL - HTTP {response.status_code}; check model, quota or API settings")
+                  )
+              except Exception as exc:
+                  results["GROQ"] = False
+                  print(f"GROQ: FAIL - {type(exc).__name__}")
+
+          # Test Facebook with a read-only Page request.
+          if not page_token or not page_id:
+              results["FACEBOOK"] = False
+              print("FACEBOOK: FAIL - Page credentials are missing")
+          else:
+              try:
+                  response = requests.get(
+                      f"https://graph.facebook.com/{version}/{page_id}",
+                      params={
+                          "fields": "id,name",
+                          "access_token": page_token,
+                      },
+                      timeout=25,
+                  )
+                  data = response.json()
+                  ok = (
+                      response.ok
+                      and str(data.get("id", "")) == page_id
+                      and bool(data.get("name"))
+                  )
+                  results["FACEBOOK"] = ok
+
+                  if ok:
+                      print(f"FACEBOOK: PASS - Page access verified: {data['name']}")
+                  else:
+                      error = data.get("error", {})
+                      code = error.get("code", "unknown") if isinstance(error, dict) else "unknown"
+                      print(
+                          f"FACEBOOK: FAIL - HTTP {response.status_code}; "
+                          f"API error code: {code}. Check token, Page ID, API version and permissions."
+                      )
+              except Exception as exc:
+                  results["FACEBOOK"] = False
+                  print(f"FACEBOOK: FAIL - {type(exc).__name__}")
+
+          print("=== Summary ===")
+          for service, ok in results.items():
+              print(f"{service}: {'PASS' if ok else 'FAIL'}")
+
+          if not all(results.values()):
+              print("OVERALL: FAIL - Review the diagnostic results above.")
+              sys.exit(1)
+
+          print("OVERALL: PASS - Both read-only connection tests succeeded.")
+          PY
