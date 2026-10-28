@@ -25,15 +25,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install Dependencies
         run: python -m pip install requests
-
       - name: Run Bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -44,62 +41,54 @@ jobs:
         run: |
           cat > /tmp/bot.py << 'PY'
           import os, requests, random
-
           groq_key = os.getenv("GROQ_API_KEY")
           page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
           page_id = os.getenv("FB_PAGE_ID")
           version = os.getenv("FACEBOOK_API_VERSION", "v20.0")
           action = os.getenv("ACTION", "post")
 
-          print(f"=== Action: {action} ===")
-
           def health_check():
               r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": "Reply with OK"}], "max_tokens": 20, "temperature": 0}, timeout=30)
+                  json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": "Reply OK"}], "max_tokens": 20, "temperature": 0}, timeout=30)
               data = r.json()
-              msg = (data.get("choices") or [{}])[0].get("message") or {}
-              final = (msg.get("content") or "").strip()
-              print(f"GROQ: {'PASS' if final else 'FAIL'} - {final} - Model: llama-3.1-8b-instant")
+              # ONLY use content, never reasoning
+              content = data.get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+              print(f"GROQ: {'PASS' if content else 'FAIL'} - {content} - Model: gpt-oss-20b")
               rf = requests.get(f"https://graph.facebook.com/{version}/{page_id}", params={"fields": "id,name", "access_token": page_token}, timeout=25)
               print(f"FACEBOOK: {'PASS' if rf.ok else 'FAIL'} - {rf.json()}")
-              return True
 
           def create_post():
-              topics = ["customer satisfaction is real love", "self love and healing", "loyalty and trust", "gratitude for customers"]
-              topic = random.choice(topics)
-              prompt = f"Write a Facebook post about {topic}. Under 35 words, emotional, human, 2 emojis, 2 hashtags. Output ONLY the post."
-
+              topics = ["customer satisfaction is real love", "self love and healing", "loyalty and trust"]
+              prompt = f"Write a Facebook post about {random.choice(topics)}. Under 35 words, emotional, 2 emojis, 2 hashtags. Output ONLY the post."
               r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={"model": "llama-3.1-8b-instant", "messages": [{"role": "system", "content": "Output ONLY the final post, no explanation."}, {"role": "user", "content": prompt}], "max_tokens": 120, "temperature": 0.9}, timeout=30)
-              
+                  json={"model": "openai/gpt-oss-20b", "messages": [{"role": "system", "content": "You are Facebook writer. Output ONLY final post. No reasoning, no chain-of-thought."}, {"role": "user", "content": prompt}], "max_tokens": 150, "temperature": 0.8}, timeout=30)
               data = r.json()
-              print(f"Groq Raw: {data}")
-              msg = (data.get("choices") or [{}])[0].get("message") or {}
-              content = (msg.get("content") or "").strip().strip('"').strip("'")
+              print(f"Raw: {data}")
+              # CRITICAL: Only content, ignore reasoning fields
+              msg = data.get("choices", [{}])[0].get("message", {})
+              content = (msg.get("content") or "").strip()
 
-              if not content:
-                  print(f"Failed to generate: {data}")
+              # If model puts reasoning in content, extract after "final:"
+              if "final:" in content.lower():
+                  content = content.lower().split("final:")[-1].strip()
+
+              content = content.strip('"').strip("'")
+              if not content or len(content) < 10:
+                  print(f"Failed: {data}")
+                  return
+              # Block leak words
+              if any(x in content.lower() for x in ["we need to", "let's craft", "we should", "reasoning"]):
+                  print(f"BLOCKED LEAK, retry blocked: {content}")
                   return
 
-              if any(x in content.lower() for x in ["we need to", "let's craft", "viral facebook post", "as an ai"]):
-                  print(f"BLOCKED LEAK: {content}")
-                  return
+              print(f"CLEAN POST: {content}")
+              pr = requests.post(f"https://graph.facebook.com/{version}/{page_id}/feed", data={"message": content, "access_token": page_token}, timeout=25)
+              print(f"FB: {pr.status_code} - {pr.json()}")
 
-              print(f"Generated CLEAN: {content}")
-
-              pr = requests.post(f"https://graph.facebook.com/{version}/{page_id}/feed",
-                  data={"message": content, "access_token": page_token}, timeout=25)
-              
-              print(f"FB POST RESPONSE: {pr.status_code} - {pr.json()}")
-              if pr.ok:
-                  print("SUCCESS: Posted clean to REAL satisfaction page!")
-
-          if action == "health_check":
-              health_check()
-          else:
-              health_check()
+          health_check()
+          if action != "health_check":
               create_post()
           PY
           python /tmp/bot.py
