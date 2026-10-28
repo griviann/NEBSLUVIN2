@@ -56,11 +56,11 @@ jobs:
           def health_check():
               r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": "Reply with OK"}], "max_tokens": 20, "temperature": 0}, timeout=30)
+                  json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": "Reply with OK"}], "max_tokens": 20, "temperature": 0}, timeout=30)
               data = r.json()
               msg = (data.get("choices") or [{}])[0].get("message") or {}
               final = (msg.get("content") or "").strip()
-              print(f"GROQ: {'PASS' if final else 'FAIL'} - {final} - Model: llama-3.3-70b-versatile")
+              print(f"GROQ: {'PASS' if final else 'FAIL'} - {final} - Model: llama-3.1-8b-instant")
               rf = requests.get(f"https://graph.facebook.com/{version}/{page_id}", params={"fields": "id,name", "access_token": page_token}, timeout=25)
               print(f"FACEBOOK: {'PASS' if rf.ok else 'FAIL'} - {rf.json()}")
               return True
@@ -72,9 +72,10 @@ jobs:
 
               r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                   headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-                  json={"model": "llama-3.3-70b-versatile", "messages": [{"role": "system", "content": "Output ONLY the final post, no explanation."}, {"role": "user", "content": prompt}], "max_tokens": 120, "temperature": 0.9}, timeout=30)
+                  json={"model": "llama-3.1-8b-instant", "messages": [{"role": "system", "content": "Output ONLY the final post, no explanation."}, {"role": "user", "content": prompt}], "max_tokens": 120, "temperature": 0.9}, timeout=30)
               
               data = r.json()
+              print(f"Groq Raw: {data}")
               msg = (data.get("choices") or [{}])[0].get("message") or {}
               content = (msg.get("content") or "").strip().strip('"').strip("'")
 
@@ -82,7 +83,6 @@ jobs:
                   print(f"Failed to generate: {data}")
                   return
 
-              # BLOCK reasoning leak - never post if leak detected
               if any(x in content.lower() for x in ["we need to", "let's craft", "viral facebook post", "as an ai"]):
                   print(f"BLOCKED LEAK: {content}")
                   return
@@ -95,8 +95,6 @@ jobs:
               print(f"FB POST RESPONSE: {pr.status_code} - {pr.json()}")
               if pr.ok:
                   print("SUCCESS: Posted clean to REAL satisfaction page!")
-              else:
-                  print("FAILED to post")
 
           if action == "health_check":
               health_check()
