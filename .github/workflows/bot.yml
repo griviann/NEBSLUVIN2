@@ -1,45 +1,84 @@
-python - <<'PY'
-import os, sys, requests
-groq_key = os.getenv("GROQ_API_KEY")
-page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
-page_id = os.getenv("FB_PAGE_ID")
-version = os.getenv("FACEBOOK_API_VERSION", "v20.0")
+name: RealSatisfaction AI Automation Scheduler
 
-print("=== RealSatisfaction AI Health Check ===")
+on:
+  schedule:
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Select a safe diagnostic action'
+        required: true
+        default: 'health_check'
+        type: choice
+        options:
+          - health_check
 
-# GROQ - handle reasoning models correctly
-r = requests.post("https://api.groq.com/openai/v1/chat/completions",
-  headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
-  json={
-    "model": "openai/gpt-oss-20b",
-    "messages": [{"role": "user", "content": "Reply with OK"}],
-    "max_tokens": 50,
-    "temperature": 0
-  }, timeout=30)
-data = r.json()
+concurrency:
+  group: realsatisfaction-bot
+  cancel-in-progress: false
 
-# Professional: support both chat and reasoning models
-choice = (data.get("choices") or [{}])[0]
-msg = choice.get("message") or {}
-content = (msg.get("content") or "").strip()
-reasoning = (msg.get("reasoning") or msg.get("reasoning_content") or "").strip()
-final_text = content or reasoning
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install requests
 
-if r.ok and final_text:
-    print(f"GROQ: PASS - AI response received: {final_text[:20]}")
-else:
-    print(f"GROQ: FAIL - HTTP {r.status_code} | Content='{content}' Reasoning='{reasoning}' | Full={data}")
-    sys.exit(1)
-
-# FACEBOOK
-rf = requests.get(f"https://graph.facebook.com/{version}/{page_id}",
-  params={"fields": "id,name", "access_token": page_token}, timeout=25)
-df = rf.json()
-if rf.ok and str(df.get("id")) == str(page_id):
-    print(f"FACEBOOK: PASS - {df.get('name')}")
-else:
-    print(f"FACEBOOK: FAIL - {rf.status_code} | {df}")
-    sys.exit(1)
-
-print("OVERALL: PASS")
-PY
+      - name: Check Groq and Facebook Connections
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v20.0' }}
+        run: |
+          python - <<'PY'
+          import os, sys, requests
+          groq_key = os.getenv("GROQ_API_KEY")
+          page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
+          page_id = os.getenv("FB_PAGE_ID")
+          version = os.getenv("FACEBOOK_API_VERSION", "v20.0")
+          
+          print("=== RealSatisfaction AI Health Check ===")
+          
+          # GROQ - use free working model
+          if not groq_key:
+              print("GROQ: FAIL - API key missing"); sys.exit(1)
+          else:
+              try:
+                  r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                      headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
+                      json={
+                          "model": "openai/gpt-oss-20b",
+                          "messages": [{"role": "user", "content": "Reply with OK"}],
+                          "max_tokens": 5, "temperature": 0
+                      }, timeout=25)
+                  data = r.json()
+                  content = data.get("choices", [{}])[0].get("message", {}).get("content", "") if data.get("choices") else ""
+                  ok = r.ok and bool(content.strip())
+                  print(f"GROQ: {'PASS - AI response received' if ok else f'FAIL - HTTP {r.status_code} | {data}'}")
+                  if not ok: sys.exit(1)
+              except Exception as e:
+                  print(f"GROQ: FAIL - {e}"); sys.exit(1)
+          
+          # FACEBOOK
+          if not page_token or not page_id:
+              print("FACEBOOK: FAIL - credentials missing"); sys.exit(1)
+          else:
+              try:
+                  r = requests.get(f"https://graph.facebook.com/{version}/{page_id}",
+                      params={"fields": "id,name", "access_token": page_token}, timeout=25)
+                  data = r.json()
+                  ok = r.ok and data.get("id") and str(data.get("id")) == str(page_id)
+                  if ok:
+                      print(f"FACEBOOK: PASS - Page access verified: {data.get('name')}")
+                  else:
+                      print(f"FACEBOOK: FAIL - HTTP {r.status_code} | {data}"); sys.exit(1)
+              except Exception as e:
+                  print(f"FACEBOOK: FAIL - {e}"); sys.exit(1)
+          
+          print("OVERALL: PASS - Both read-only connection tests succeeded.")
+          PY
