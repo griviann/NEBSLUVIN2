@@ -19,30 +19,28 @@ jobs:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
         run: |
           python - << 'PY'
-          import os,requests
+          import os,requests,re
           gk=os.getenv("GROQ_API_KEY")
           pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
           pid=os.getenv("FB_PAGE_ID")
-          print("Keys loaded:", bool(gk), bool(pt), bool(pid))
-          url="https://api.groq.com/openai/v1/chat/completions"
-          payload={
-            "model":"openai/gpt-oss-20b",
-            "messages":[{"role":"user","content":"Write a short Facebook post about self love healing. 15 words, emotional, 2 emojis."}],
-            "max_tokens":100
-          }
-          r=requests.post(url,headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json=payload,timeout=30)
-          print(f"Status: {r.status_code}")
+          r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"user","content":"Write a short Facebook post about self love healing. 15 words, emotional, 2 emojis."}],"max_tokens":120},timeout=30)
           data=r.json()
-          print(f"Full response: {data}")
-          try:
-              content=data["choices"][0]["message"]["content"]
-              print(f"RAW content: {content}")
-              clean=content.split("\n")[0].strip()
-              if "Count" in clean: clean=clean.split("Count")[0]
-              print(f"CLEAN: {clean}")
-              if clean and len(clean)>10:
-                  fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":clean,"access_token":pt},timeout=25)
-                  print(f"FB: {fb.status_code} {fb.json()}")
-          except Exception as e:
-              print(f"Error: {e}")
+          msg=data["choices"][0]["message"]
+          # content is empty, real post is in reasoning
+          raw = msg.get("content") or msg.get("reasoning") or ""
+          print(f"RAW FROM GROQ: {raw}")
+          # Extract text inside quotes if exists
+          m=re.search(r'"([^"]{10,200})"',raw)
+          if m:
+              clean=m.group(1)
+          else:
+              # fallback: take first line before "Count words"
+              clean=raw.split("Count words")[0].split("\n")[-1].strip().strip('"')
+          clean=clean.strip()
+          print(f"CLEAN POST: {clean}")
+          if clean and len(clean)>10:
+              fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":clean,"access_token":pt},timeout=25)
+              print(f"FB RESULT: {fb.json()}")
+              if fb.ok:
+                  print("SUCCESS - Posted to REAL satisfaction!")
           PY
