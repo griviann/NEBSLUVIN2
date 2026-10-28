@@ -2,7 +2,9 @@ name: bot
 on:
   workflow_dispatch:
   schedule:
+    - cron: '15 17 * * *'
     - cron: '0 */3 * * *'
+    - cron: '*/15 * * * *'
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -12,35 +14,66 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: Run Bot
+      - name: V13.2 POSITIVE IMPACT
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
         run: |
           python - << 'PY'
-          import os,requests,re
+          import os, requests, re, json, random
           gk=os.getenv("GROQ_API_KEY")
           pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
           pid=os.getenv("FB_PAGE_ID")
-          r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"user","content":"Write a short Facebook post about self love healing. 15 words, emotional, 2 emojis."}],"max_tokens":120},timeout=30)
-          data=r.json()
-          msg=data["choices"][0]["message"]
-          # content is empty, real post is in reasoning
-          raw = msg.get("content") or msg.get("reasoning") or ""
-          print(f"RAW FROM GROQ: {raw}")
-          # Extract text inside quotes if exists
-          m=re.search(r'"([^"]{10,200})"',raw)
-          if m:
-              clean=m.group(1)
-          else:
-              # fallback: take first line before "Count words"
-              clean=raw.split("Count words")[0].split("\n")[-1].strip().strip('"')
-          clean=clean.strip()
-          print(f"CLEAN POST: {clean}")
-          if clean and len(clean)>10:
-              fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":clean,"access_token":pt},timeout=25)
-              print(f"FB RESULT: {fb.json()}")
-              if fb.ok:
-                  print("SUCCESS - Posted to REAL satisfaction!")
+          mem_file="replied_comments.json"
+          memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
+          impact_templates=[
+            "The power of kindness in a harsh world - remind people small acts matter",
+            "Healing self-hate and building self-worth - teach that you deserve love",
+            "Forgiveness is not weakness, it's freedom - explain letting go heals you",
+            "Mental health matters, it's okay to not be okay - normalize seeking help",
+            "Setting boundaries is self-respect, not selfishness - teach healthy limits",
+            "Community over competition, we rise by lifting others - promote unity",
+            "Words have power, speak life to yourself and others - promote positive speech",
+            "Rest is productive, you don't have to burn out to be worthy - anti hustle culture",
+            "Empathy heals society, listen to understand not to reply - teach listening"
+          ]
+          def groq_clean(prompt):
+              r=requests.post("https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},
+                json={"model":"openai/gpt-oss-20b","messages":[{"role":"user","content":prompt}],"max_tokens":130},timeout=30)
+              msg=r.json()["choices"][0]["message"]
+              raw=msg.get("content") or msg.get("reasoning") or ""
+              m=re.search(r'"([^"]{10,250})"',raw)
+              clean=m.group(1) if m else raw.split("Count")[0].split("\n")[0].strip().strip('"')
+              clean=re.sub(r'\(\d+\)','',clean)
+              return clean.strip()
+          try:
+              posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts?fields=id&limit=3&access_token={pt}").json().get("data",[])
+              for p in posts:
+                  coms=requests.get(f"https://graph.facebook.com/v20.0/{p['id']}/comments?fields=id,message,from&limit=15&access_token={pt}").json().get("data",[])
+                  for c in coms:
+                      cid=c["id"]
+                      if cid in memory: continue
+                      if c.get("from",{}).get("id")==pid: continue
+                      vibe=random.choice(impact_templates)
+                      pr=f"Reply to: '{c.get('message','')}'. Theme: {vibe}. Rules: Warm mature positive impact to society, no tribal no politics no prescription, end with reflective question, under 25 words, 1 emoji. Output ONLY inside quotes."
+                      rep=groq_clean(pr)
+                      if len(rep)>10:
+                          requests.post(f"https://graph.facebook.com/v20.0/{cid}/comments",data={"message":rep,"access_token":pt})
+                          memory.append(cid)
+              json.dump(memory,open(mem_file,"w"))
+          except Exception as e:
+              print(f"Reply error {e}")
+          try:
+              theme=random.choice(impact_templates)
+              post_prompt=f"Write a Facebook post about: {theme}. Goal: positively impact society, heal, inspire. Style: mature REAL Satisfaction voice, 18 words max, 2 emojis, 2 hashtags #RealSatisfaction #Healing. Output ONLY one line inside quotes."
+              post=groq_clean(post_prompt)
+              print(f"CLEAN POST: {post}")
+              if post:
+                  fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post,"access_token":pt}).json()
+                  print(f"FB: {fb}")
+          except Exception as e:
+              print(e)
+          os.system(f"git config user.name 'bot' && git config user.email 'bot@real.local' && git add {mem_file} && git commit -m 'V13.2 memory' || true && git push || true")
           PY
