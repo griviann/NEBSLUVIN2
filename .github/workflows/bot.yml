@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V16 REAL AI
+      - name: V17 REAL AI with Comments
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -40,7 +40,7 @@ jobs:
               j=r.json()
               msg=j["choices"][0]["message"]
               raw=msg.get("content") or msg.get("reasoning") or ""
-              print(f"RAW from {model}: {raw[:500]}")
+              print(f"RAW {model}: {raw[:400]}")
               m=re.search(r'"([^"]{10,400})"',raw,re.DOTALL)
               final=m.group(1).strip() if m else raw.strip()[:350]
               if len(final)<15:
@@ -49,33 +49,54 @@ jobs:
             except Exception as e:
               print(f"err {model}: {e}")
               return ""
-          def research_topic():
-            topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
-            avail=[t for t in topics if t not in learned[-5:]]
-            chosen=random.choice(avail or topics)
-            learned.append(chosen)
-            if len(learned)>30:
-              learned.pop(0)
-            open(learn_file,"w").write(json.dumps(learned))
-            return chosen
-          topic=research_topic()
-          print(f"Researching: {topic}")
-          post_text=ask(SYSTEM, f"Create Facebook post about {topic}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "llama-3.1-8b-instant")
+          # 1. RESEARCH TOPIC
+          topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
+          avail=[t for t in topics if t not in learned[-5:]]
+          chosen=random.choice(avail or topics)
+          learned.append(chosen)
+          if len(learned)>30:
+            learned.pop(0)
+          open(learn_file,"w").write(json.dumps(learned))
+          print(f"Researching: {chosen}")
+          # 2. CREATE REAL AI POST
+          post_text=ask(SYSTEM, f"Create Facebook post about {chosen}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "llama-3.1-8b-instant")
           if not post_text:
-            post_text=ask(SYSTEM, f"Create Facebook post about {topic}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "openai/gpt-oss-20b")
-          print(f"FINAL REAL AI POST: {post_text}")
+            post_text=ask(SYSTEM, f"Create Facebook post about {chosen}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "openai/gpt-oss-20b")
+          print(f"FINAL POST: {post_text}")
           if post_text and len(post_text)>15:
             url="https://graph.facebook.com/v20.0/"+pid+"/feed"
             fb=requests.post(url,data={"message":post_text,"access_token":pt}).json()
-            print(f"FB Result: {fb}")
-          else:
-            print("Both models failed - no post")
+            print(f"FB Post Result: {fb}")
+          # 3. REPLY TO COMMENTS - REAL AI
+          try:
+            posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts",params={"access_token":pt,"limit":5}).json()
+            for p in posts.get("data",[]):
+              post_id=p["id"]
+              comms=requests.get(f"https://graph.facebook.com/v20.0/{post_id}/comments",params={"access_token":pt,"limit":20}).json()
+              for c in comms.get("data",[]):
+                cid=c["id"]
+                if cid in memory:
+                  continue
+                ctext=c.get("message","")
+                if not ctext:
+                  continue
+                reply=ask("You are warm healer replying to Facebook comment. Inside quotes 12-18 words, 1 emoji, question.", f"Reply empathetically to this comment: '{ctext}'. Inside quotes.", "llama-3.1-8b-instant")
+                if reply:
+                  url2="https://graph.facebook.com/v20.0/"+cid+"/comments"
+                  r2=requests.post(url2,data={"message":reply,"access_token":pt}).json()
+                  print(f"Replied to {cid}: {reply} -> {r2}")
+                  memory.append(cid)
+                  if len(memory)>200:
+                    memory=memory[-200:]
+          except Exception as e:
+            print(f"comment error: {e}")
+          # 4. SAVE MEMORY
           try:
             open(mem_file,"w").write(json.dumps(memory))
             subprocess.run(["git","config","user.name","bot"],check=True)
             subprocess.run(["git","config","user.email","bot@real.local"],check=True)
             subprocess.run(["git","add",mem_file,learn_file],check=True)
-            subprocess.run(["git","commit","-m","V16 real AI"],check=True)
+            subprocess.run(["git","commit","-m","V17 real AI + comments"],check=True)
             subprocess.run(["git","push",f"https://x-access-token:{gh}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git","HEAD:main"],check=True)
             print("Memory saved")
           except Exception as e:
