@@ -1,0 +1,10 @@
+workflows:
+  real-bot:
+    name: Real Satisfaction Bot
+    instance_type: linux
+    max_build_duration: 10
+    scripts:
+      - name: Post dynamic
+        script: |
+          pip3 install groq requests
+          python3 app.py
