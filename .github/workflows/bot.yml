@@ -1,10 +1,8 @@
-
 name: RealSatisfaction AI Automation Scheduler
 
 on:
   schedule:
     - cron: '0 */3 * * *'
-
   workflow_dispatch:
     inputs:
       action:
@@ -23,119 +21,64 @@ jobs:
   run-automation:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install Dependencies
-        run: python -m pip install requests
+      - run: python -m pip install requests
 
       - name: Check Groq and Facebook Connections
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v26.0' }}
+          FACEBOOK_API_VERSION: ${{ secrets.FACEBOOK_API_VERSION || 'v20.0' }}
         run: |
           python - <<'PY'
-          import os
-          import sys
-          import requests
-
+          import os, sys, requests
           groq_key = os.getenv("GROQ_API_KEY")
           page_token = os.getenv("FB_PAGE_ACCESS_TOKEN")
           page_id = os.getenv("FB_PAGE_ID")
-          version = os.getenv("FACEBOOK_API_VERSION", "v26.0")
-
-          results = {}
-
+          version = os.getenv("FACEBOOK_API_VERSION", "v20.0")
+          
           print("=== RealSatisfaction AI Health Check ===")
-
-          # Test Groq using a minimal request.
+          
+          # GROQ - use free working model
           if not groq_key:
-              results["GROQ"] = False
-              print("GROQ: FAIL - API key is missing")
+              print("GROQ: FAIL - API key missing"); sys.exit(1)
           else:
               try:
-                  response = requests.post(
-                      "https://api.groq.com/openai/v1/chat/completions",
-                      headers={
-                          "Authorization": f"Bearer {groq_key}",
-                          "Content-Type": "application/json",
-                      },
+                  r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                      headers={"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"},
                       json={
-                          "model": "llama-3.3-70b-versatile",
-                          "messages": [
-                              {"role": "user", "content": "Reply with OK"}
-                          ],
-                          "max_tokens": 5,
-                          "temperature": 0,
-                      },
-                      timeout=25,
-                  )
-                  data = response.json()
-                  ok = (
-                      response.ok
-                      and bool(data.get("choices"))
-                      and bool(data["choices"][0].get("message", {}).get("content", "").strip())
-                  )
-                  results["GROQ"] = ok
-                  print(
-                      "GROQ: " + ("PASS - AI response received" if ok
-                      else f"FAIL - HTTP {response.status_code}; check model, quota or API settings")
-                  )
-              except Exception as exc:
-                  results["GROQ"] = False
-                  print(f"GROQ: FAIL - {type(exc).__name__}")
-
-          # Test Facebook with a read-only Page request.
+                          "model": "openai/gpt-oss-20b",
+                          "messages": [{"role": "user", "content": "Reply with OK"}],
+                          "max_tokens": 5, "temperature": 0
+                      }, timeout=25)
+                  data = r.json()
+                  content = data.get("choices", [{}])[0].get("message", {}).get("content", "") if data.get("choices") else ""
+                  ok = r.ok and bool(content.strip())
+                  print(f"GROQ: {'PASS - AI response received' if ok else f'FAIL - HTTP {r.status_code} | {data}'}")
+                  if not ok: sys.exit(1)
+              except Exception as e:
+                  print(f"GROQ: FAIL - {e}"); sys.exit(1)
+          
+          # FACEBOOK
           if not page_token or not page_id:
-              results["FACEBOOK"] = False
-              print("FACEBOOK: FAIL - Page credentials are missing")
+              print("FACEBOOK: FAIL - credentials missing"); sys.exit(1)
           else:
               try:
-                  response = requests.get(
-                      f"https://graph.facebook.com/{version}/{page_id}",
-                      params={
-                          "fields": "id,name",
-                          "access_token": page_token,
-                      },
-                      timeout=25,
-                  )
-                  data = response.json()
-                  ok = (
-                      response.ok
-                      and str(data.get("id", "")) == page_id
-                      and bool(data.get("name"))
-                  )
-                  results["FACEBOOK"] = ok
-
+                  r = requests.get(f"https://graph.facebook.com/{version}/{page_id}",
+                      params={"fields": "id,name", "access_token": page_token}, timeout=25)
+                  data = r.json()
+                  ok = r.ok and data.get("id") and str(data.get("id")) == str(page_id)
                   if ok:
-                      print(f"FACEBOOK: PASS - Page access verified: {data['name']}")
+                      print(f"FACEBOOK: PASS - Page access verified: {data.get('name')}")
                   else:
-                      error = data.get("error", {})
-                      code = error.get("code", "unknown") if isinstance(error, dict) else "unknown"
-                      print(
-                          f"FACEBOOK: FAIL - HTTP {response.status_code}; "
-                          f"API error code: {code}. Check token, Page ID, API version and permissions."
-                      )
-              except Exception as exc:
-                  results["FACEBOOK"] = False
-                  print(f"FACEBOOK: FAIL - {type(exc).__name__}")
-
-          print("=== Summary ===")
-          for service, ok in results.items():
-              print(f"{service}: {'PASS' if ok else 'FAIL'}")
-
-          if not all(results.values()):
-              print("OVERALL: FAIL - Review the diagnostic results above.")
-              sys.exit(1)
-
+                      print(f"FACEBOOK: FAIL - HTTP {r.status_code} | {data}"); sys.exit(1)
+              except Exception as e:
+                  print(f"FACEBOOK: FAIL - {e}"); sys.exit(1)
+          
           print("OVERALL: PASS - Both read-only connection tests succeeded.")
           PY
