@@ -19,20 +19,30 @@ jobs:
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
         run: |
           python - << 'PY'
-          import os,requests,re
+          import os,requests
           gk=os.getenv("GROQ_API_KEY")
           pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
           pid=os.getenv("FB_PAGE_ID")
-          def clean(t):
-              t=t.split("\n")[0]
-              t=re.sub(r'\(\d+\)','',t)
-              t=re.sub(r'\b\w+\d+\b','',t)
-              return t.strip(' "\'')
-          r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":"Output ONLY one line Facebook post."},{"role":"user","content":"Write Facebook post about self love healing, under 20 words, 2 emojis, 2 hashtags, one line only."}],"max_tokens":60,"temperature":0.8},timeout=30)
-          raw=r.json()["choices"][0]["message"]["content"]
-          print(f"RAW:{raw}")
-          post=clean(raw)
-          if "Count" in post: post=post.split("Count")[0]
-          print(f"CLEAN:{post}")
-          requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post,"access_token":pt})
+          print("Keys loaded:", bool(gk), bool(pt), bool(pid))
+          url="https://api.groq.com/openai/v1/chat/completions"
+          payload={
+            "model":"openai/gpt-oss-20b",
+            "messages":[{"role":"user","content":"Write a short Facebook post about self love healing. 15 words, emotional, 2 emojis."}],
+            "max_tokens":100
+          }
+          r=requests.post(url,headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json=payload,timeout=30)
+          print(f"Status: {r.status_code}")
+          data=r.json()
+          print(f"Full response: {data}")
+          try:
+              content=data["choices"][0]["message"]["content"]
+              print(f"RAW content: {content}")
+              clean=content.split("\n")[0].strip()
+              if "Count" in clean: clean=clean.split("Count")[0]
+              print(f"CLEAN: {clean}")
+              if clean and len(clean)>10:
+                  fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":clean,"access_token":pt},timeout=25)
+                  print(f"FB: {fb.status_code} {fb.json()}")
+          except Exception as e:
+              print(f"Error: {e}")
           PY
