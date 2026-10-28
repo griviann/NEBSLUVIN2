@@ -25,60 +25,61 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           import os, requests, re, json, random, subprocess
-          gk=os.getenv("GROQ_API_KEY")
-          pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
-          pid=os.getenv("FB_PAGE_ID")
-          gh=os.getenv("GH_TOKEN")
-          mem_file="replied_comments.json"
-          learn_file="learned_topics.json"
+          gk=os.getenv("GROQ_API_KEY"); pt=os.getenv("FB_PAGE_ACCESS_TOKEN"); pid=os.getenv("FB_PAGE_ID"); gh=os.getenv("GH_TOKEN")
+          mem_file="replied_comments.json"; learn_file="learned_topics.json"
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Warm, mature, healer, positive societal impact. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
+          
+          # HUMAN FALLBACK BANK - like me when AI fails
+          FALLBACK=[
+            "Rest is not laziness, it is how your soul heals and rebuilds strength. 🌿 When did you last allow yourself to truly rest?",
+            "Kindness costs nothing but leaves healing everywhere it touches. 💛 Who can you show unexpected kindness to today?",
+            "Setting boundaries is not selfish, it is how you protect your peace. 🌸 What boundary do you need to honor today?",
+            "You are not behind in life, you are on your own sacred timing. 🌱 What if your journey is unfolding exactly as it should?",
+            "Empathy is listening to understand, not to reply. 🤝 Who needs you to really hear them today?"
+          ]
+          
+          SYSTEM="You are REAL Satisfaction AI, replica of Meta AI. Warm, mature, healer. Always answer inside double quotes only, 18-24 words, 1-2 emojis, ends with reflective question."
           def ask(sys, usr):
             try:
               r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":"openai/gpt-oss-20b","messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":150},timeout=40)
-              content=r.json()["choices"][0]["message"].get("content","")
-              m=re.search(r'"([^"]{15,320})"',content,re.DOTALL)
-              final=m.group(1).strip() if m else ""
+              j=r.json()
+              print(f"Groq raw: {str(j)[:300]}")
+              content=j["choices"][0]["message"].get("content","")
+              m=re.search(r'"([^"]{10,400})"',content,re.DOTALL)
+              final=m.group(1).strip() if m else content.strip()[:300]
+              if len(final)<10: return ""
               if any(w in final.lower() for w in ["theme:","output only","system prompt","word count"]): return ""
               return final
             except Exception as e:
               print(f"groq err {e}"); return ""
+          
           def research_topic():
             topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
             avail=[t for t in topics if t not in learned[-5:]]
             chosen=random.choice(avail or topics)
-            learned.append(chosen)
+            learned.append(chosen); 
             if len(learned)>30: learned.pop(0)
             open(learn_file,"w").write(json.dumps(learned))
             return chosen
+          
+          post_text=""
+          topic=research_topic()
+          print(f"Researching: {topic}")
+          ai_post=ask(SYSTEM, f"Create Facebook post about {topic}. Positive societal impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.")
+          print(f"AI Generated: {ai_post}")
+          post_text=ai_post if ai_post and len(ai_post)>15 else random.choice(FALLBACK)
+          print(f"Final post to use: {post_text}")
+          if post_text:
+            fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post_text,"access_token":pt}).json()
+            print(f"FB Result: {fb}")
+          
           try:
-            posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts?fields=id&limit=2&access_token={pt}").json().get("data",[])
-            for p in posts:
-              coms=requests.get(f"https://graph.facebook.com/v20.0/{p['id']}/comments?fields=id,message,from&limit=10&access_token={pt}").json().get("data",[])
-              for c in coms:
-                cid=c["id"]
-                if cid in memory or c.get("from",{}).get("id")==pid: continue
-                reply=ask(SYSTEM, f"User said '{c.get('message','')[:80]}'. Reply empathy positive impact 20 words emoji question inside quotes.")
-                if reply:
-                  requests.post(f"https://graph.facebook.com/v20.0/{cid}/comments",data={"message":reply,"access_token":pt})
-                  memory.append(cid)
             open(mem_file,"w").write(json.dumps(memory))
-          except Exception as e: print(f"reply err {e}")
-          try:
-            topic=research_topic()
-            print(f"Researching: {topic}")
-            post=ask(SYSTEM, f"Create Facebook post about {topic}. Positive societal impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.")
-            print(f"Generated post: {post}")
-            if post:
-              fb=requests.post(f"https://graph.facebook.com/v20.0/{pid}/feed",data={"message":post,"access_token":pt}).json()
-              print(f"Posted to FB: {fb}")
-          except Exception as e: print(f"post err {e}")
-          try:
             subprocess.run(["git","config","user.name","bot"],check=True)
             subprocess.run(["git","config","user.email","bot@real.local"],check=True)
             subprocess.run(["git","add",mem_file,learn_file],check=True)
             subprocess.run(["git","commit","-m","V15 learning"],check=True)
             subprocess.run(["git","push",f"https://x-access-token:{gh}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git","HEAD:main"],check=True)
-            print("Memory saved to GitHub")
-          except Exception as e: print(f"git push info: {e}")
+            print("Memory saved")
+          except Exception as e: print(f"git info: {e}")
