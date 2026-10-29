@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V3.3 FIXED - Free Models Oct 2026
+      - name: V3.4 AI REPLY - Kenya Me
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -45,15 +45,16 @@ jobs:
               low=t.lower()
               if "answer inside double quotes" in low: return False
               if "18-24 words" in low: return False
+              if "mjinga" in low or "umbwa" in low: return False
               return True
           
-          def ask_groq(sys_prompt, user_prompt):
+          def ask_groq(sys_prompt, user_prompt, max_t=300):
               MODELS=["openai/gpt-oss-20b","openai/gpt-oss-120b"]
               for model in MODELS:
                   try:
                       r=requests.post("https://api.groq.com/openai/v1/chat/completions",
                           headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},
-                          json={"model":model,"messages":[{"role":"system","content":sys_prompt},{"role":"user","content":user_prompt}],"max_tokens":300},
+                          json={"model":model,"messages":[{"role":"system","content":sys_prompt},{"role":"user","content":user_prompt}],"max_tokens":max_t},
                           timeout=40)
                       j=r.json()
                       print(f"TRY {model}: {str(j)[:800]}")
@@ -65,13 +66,34 @@ jobs:
                       m=re.search(r'"([^"]{10,400})"',raw,re.DOTALL)
                       final=m.group(1).strip() if m else raw.strip()[:350]
                       final=final.strip().rstrip("?").strip()
-                      if is_clean(final) and len(final)>15:
+                      if is_clean(final) and len(final)>12:
                           print(f"SUCCESS {model}: {final}")
                           return final
                   except Exception as e:
                       print(f"err {model}: {e}")
                       continue
               return ""
+          
+          def ai_comment_reply(comment_text):
+              sys_p="You are warm Kenyan healer, empathetic. Reply inside double quotes only, 12-18 words, 1 emoji, ends with question. No Swahili insult. Be supportive."
+              user_p=f"Reply with empathy to this Facebook comment: '{comment_text}'. Simple English, warm, question at end. Inside double quotes."
+              ans=ask_groq(sys_p, user_p, max_t=150)
+              if not ans:
+                  low=comment_text.lower()
+                  if "stress" in low or "choka" in low: ans="Pole sana mkuu, niko hapa. Your quiet presence matters. Tuongee kidogo"
+                  elif "poa" in low: ans="Poa sana mkuu, asante kwa ku-share. Pamoja tunaweza kupona pole pole"
+                  else: ans="Asante sana for sharing. You help our community heal together"
+              return ans
+          
+          def ai_inbox_reply(msg_text):
+              sys_p="You are warm Kenyan support friend for DMs. Reply inside double quotes only, 12-20 words, 1 emoji, caring, ends with question."
+              user_p=f"Reply supportively to this DM: '{msg_text}'. Inside double quotes."
+              ans=ask_groq(sys_p, user_p, max_t=150)
+              if not ans:
+                  low=msg_text.lower()
+                  if "help" in low or "msaada" in low: ans="Niko hapa mkuu, karibu. Tell me more, niko na time yako. Pamoja tutapata solution"
+                  else: ans="Asante kwa DM mkuu. Nimepokea message yako. Niko hapa kukusupport, poa poa"
+              return ans
           
           now=datetime.datetime.now()
           should_post=(now.hour%3==0 and now.minute<20)
@@ -85,7 +107,7 @@ jobs:
               if len(learned)>30: learned.pop(0)
               open(learn_file,"w").write(json.dumps(learned))
               print(f"Researching: {chosen}")
-              post_text=ask_groq("You are REAL Satisfaction AI. Warm mature healer. Answer inside double quotes only, 18-24 words, 1-2 emojis, ends with question.", f"Create Facebook post about {chosen}. Positive impact. Inside quotes.")
+              post_text=ask_groq("You are REAL Satisfaction AI. Warm mature healer. Answer inside double quotes only, 18-24 words, 1-2 emojis, ends with question.", f"Create Facebook post about {chosen}. Positive impact. Inside quotes.", max_t=300)
               print(f"FINAL POST: {post_text}")
               if post_text:
                   final_fb=f"{post_text}? 🌱🤝 #RealSatisfaction #Healing"
@@ -95,7 +117,7 @@ jobs:
           else:
               print("Skip post this run")
           
-          # COMMENTS
+          # --- COMMENTS AI REPLY ---
           try:
               posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts",params={"access_token":pt,"limit":5}).json().get("data",[])
               for p in posts:
@@ -104,16 +126,17 @@ jobs:
                       cid=c["id"]
                       if cid in memory: continue
                       if c.get("from",{}).get("id")==pid: continue
-                      if not c.get("message"): continue
-                      reply="Asante sana for sharing. You help our community heal together? 🌱"
-                      requests.post(f"https://graph.facebook.com/v20.0/{cid}/comments",data={"message":reply,"access_token":pt})
+                      txt_msg=c.get("message","")
+                      if not txt_msg: continue
+                      reply=ai_comment_reply(txt_msg)
+                      print(f"AI COMMENT REPLY to {txt_msg[:50]} => {reply}")
+                      requests.post(f"https://graph.facebook.com/v20.0/{cid}/comments",data={"message":reply+"?","access_token":pt})
                       memory.append(cid)
-                      print(f"Replied {cid}")
                       if len(memory)>300: memory=memory[-300:]
           except Exception as e:
               print(f"comment error: {e}")
           
-          # INBOX
+          # --- INBOX AI REPLY ---
           try:
               convs=requests.get(f"https://graph.facebook.com/v20.0/{pid}/conversations",params={"access_token":pt,"fields":"id,messages{id,message,from}","limit":10}).json().get("data",[])
               for conv in convs[:10]:
@@ -123,10 +146,12 @@ jobs:
                   mid=last["id"]
                   if mid in inbox_mem: continue
                   if last.get("from",{}).get("id")==pid: continue
-                  rep="Asante kwa DM mkuu. Nimepokea message yako. Niko hapa kukusupport, poa poa?"
-                  requests.post(f"https://graph.facebook.com/v20.0/{conv['id']}/messages",data={"message":rep,"access_token":pt})
+                  dm_text=last.get("message","")
+                  if not dm_text: continue
+                  rep=ai_inbox_reply(dm_text)
+                  print(f"AI INBOX REPLY to {dm_text[:50]} => {rep}")
+                  requests.post(f"https://graph.facebook.com/v20.0/{conv['id']}/messages",data={"message":rep+"?","access_token":pt})
                   inbox_mem.append(mid)
-                  print(f"Inbox {mid}")
                   if len(inbox_mem)>300: inbox_mem=inbox_mem[-300:]
           except Exception as e:
               print(f"inbox error: {e}")
@@ -139,8 +164,8 @@ jobs:
               subprocess.run(["git","config","user.name","bot"],check=True)
               subprocess.run(["git","config","user.email","bot@real.local"],check=True)
               subprocess.run(["git","add",mem_file,inbox_file,learn_file],check=True)
-              subprocess.run(["git","commit","-m","V3.3 fixed free models"],check=True)
+              subprocess.run(["git","commit","-m","V3.4 AI reply"],check=True)
               subprocess.run(["git","push",f"https://x-access-token:{gh}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git","HEAD:main"],check=True)
-              print("Memory saved")
+              print("Memory saved V3.4")
           except Exception as e:
               print(f"git: {e}")
