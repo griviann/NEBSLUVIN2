@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V3.7 KENYAN CHAIR INCLUSIVE
+      - name: V5.0 PERFORMANCE BUILDER AGENT
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -25,63 +25,136 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           import os,requests,re,json,random,subprocess,datetime
+          # PAUSE CHECK FROM CONTROL KITI HOST APP
+          if os.path.exists('PAUSE.flag'):
+            print("⏸️ PAUSED by CONTROL KITI - exiting")
+            exit(0)
+
           gk=os.getenv('GROQ_API_KEY')
           pt=os.getenv('FB_PAGE_ACCESS_TOKEN')
           pid=os.getenv('FB_PAGE_ID')
           gh=os.getenv('GH_TOKEN')
+          
           mem_file='replied_comments.json'
           inbox_file='replied_inbox.json'
           learn_file='learned_topics.json'
           users_file='known_users.json'
+          prompt_file='prompt_agent.json'
+          perf_file='performance.json'
+          
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           inbox_mem=json.load(open(inbox_file)) if os.path.exists(inbox_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
           known=json.load(open(users_file)) if os.path.exists(users_file) else []
+          perf=json.load(open(perf_file)) if os.path.exists(perf_file) else {"posts_checked":0,"avg_likes":0,"avg_comments":0,"history":[]}
+          
+          default_prompts={
+            "welcome_prompt": "You are warm Kenyan host from Eldoret, One Kenyan Chair For All, inclusive of all tribes. Reply inside double quotes only, 16-22 words, 1 emoji, ends with question. Must say 'Karibu sana! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You'.",
+            "heal_prompt": "You are REAL Satisfaction, warm Kenyan healer. User asked direct question, answer it clearly first, then supportive. Reply inside double quotes only, 15-22 words, 1 emoji, ends with question. If they ask 'how often' say '3 times daily, karibu'. Inclusive warm Kenyan.",
+            "post_prompt": "You are REAL Satisfaction viral writer for Kenya. Create POST that gets likes: start with relatable Kenyan story or bold question, add practical tip, include 'One Kenyan Chair For All' and 'Karibu'. Answer inside double quotes only, 20-26 words, 2 emojis, ends with engaging question like 'Unakubali?' or 'Uko tayari?'. Never generic.",
+            "builder_prompt": "You are Prompt Engineer for Kenyan inclusive bot One Kenyan Chair For All. Your job is to write a better SYSTEM PROMPT that is warmer, more inclusive, more Kenyan, more viral. Must include instruction 'inside double quotes only' and 'Karibu'. Output inside double quotes only. Keep under 40 words.",
+            "evolution_count": 0,
+            "total_replies": 0,
+            "last_evolution": "none",
+            "evolution_reason": "init"
+          }
+          prompts=json.load(open(prompt_file)) if os.path.exists(prompt_file) else default_prompts
+          for k in default_prompts:
+            if k not in prompts: prompts[k]=default_prompts[k]
+
           def is_clean(t):
             if not t: return False
             low=t.lower()
             return 'answer inside' not in low and 'mjinga' not in low
+
           def ask_groq(sys_p,user_p,max_t=300):
             for model in ['openai/gpt-oss-20b','openai/gpt-oss-120b']:
               try:
                 r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':model,'messages':[{'role':'system','content':sys_p},{'role':'user','content':user_p}],'max_tokens':max_t},timeout=40)
                 j=r.json()
-                print(f"TRY {model}: {str(j)[:600]}")
+                print(f"TRY {model}: {str(j)[:500]}")
                 if 'choices' not in j: continue
                 raw=j['choices'][0]['message'].get('content') or ''
-                m=re.search(r'"([^"]{10,400})"',raw,re.DOTALL)
-                final=m.group(1).strip() if m else raw.strip()[:350]
+                m=re.search(r'"([^"]{10,500})"',raw,re.DOTALL)
+                final=m.group(1).strip() if m else raw.strip()[:400]
                 final=final.strip().rstrip('?').strip()
-                if is_clean(final) and len(final)>10:
+                if is_clean(final) and len(final)>12:
                   print(f"SUCCESS: {final}")
                   return final
               except Exception as e:
                 print(f"err {model}: {e}")
             return ''
+
+          def check_performance():
+            try:
+              posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'fields':'id,likes.summary(true),comments.summary(true)','limit':10}).json().get('data',[])
+              if not posts: return 0,0,"no posts"
+              total_likes=sum(p.get('likes',{}).get('summary',{}).get('total_count',0) for p in posts)
+              total_comments=sum(p.get('comments',{}).get('summary',{}).get('total_count',0) for p in posts)
+              avg_likes=total_likes/max(len(posts),1)
+              avg_comments=total_comments/max(len(posts),1)
+              perf["posts_checked"]=len(posts)
+              perf["avg_likes"]=avg_likes
+              perf["avg_comments"]=avg_comments
+              perf["history"].append({"time":str(datetime.datetime.now()),"avg_likes":avg_likes,"avg_comments":avg_comments})
+              if len(perf["history"])>30: perf["history"].pop(0)
+              print(f"PERFORMANCE: avg_likes={avg_likes:.1f} avg_comments={avg_comments:.1f} over {len(posts)} posts")
+              if avg_likes < 3 and len(posts)>=3: return avg_likes, avg_comments, f"LOW engagement {avg_likes:.1f} likes - needs viral"
+              if avg_likes > 10: return avg_likes, avg_comments, f"HIGH {avg_likes:.1f} likes - keep"
+              return avg_likes, avg_comments, f"MEDIUM {avg_likes:.1f} likes"
+            except Exception as e:
+              print(f"perf error {e}")
+              return 0,0,f"error {e}"
+
+          def builder_agent():
+            prompts["evolution_count"]=prompts.get("evolution_count",0)+1
+            count=prompts["evolution_count"]
+            avg_likes, avg_comments, reason = check_performance()
+            print(f"BUILDER RUN #{count} | {reason}")
+            should_evolve=False
+            target="post_prompt"
+            instruction=""
+            if "LOW" in reason:
+              should_evolve=True
+              target="post_prompt"
+              instruction=f"Last posts got LOW likes {avg_likes}. Current: '{prompts['post_prompt']}'. Rewrite to be MORE VIRAL, catchy Kenyan story, start with question, include 'One Kenyan Chair For All' and 'Karibu', call to action like Unakubali? Inside quotes only."
+            elif count % 20 == 0:
+              should_evolve=True
+              target="welcome_prompt"
+              instruction=f"Current welcome: '{prompts['welcome_prompt']}'. Avg likes {avg_likes}. Make warmer, inclusive for all tribes, convert visitor to follower. Must keep 'Kenyan Chair For All' and 'Karibu'. Inside quotes."
+            if should_evolve:
+              print(f"EVOLVING {target} because: {reason}")
+              new_prompt=ask_groq(prompts["builder_prompt"], instruction, 250)
+              if new_prompt and 30 < len(new_prompt) < 300:
+                prompts[target]=new_prompt
+                prompts["last_evolution"]=f"Run {count}: {target} evolved"
+                prompts["evolution_reason"]=reason
+                print(f"EVOLVED {target} -> {new_prompt}")
+
+          builder_agent()
+
           def ai_reply(txt, is_new=False):
             if is_new:
-              sys_p='You are warm Kenyan host from Eldoret, inclusive. You welcome guest to Kenyan Chair For All. Reply inside double quotes only, 14-20 words, 1 emoji, ends with question. Say Karibu, this Kenyan chair is yours, Kenya Me Kenyan You.'
-              return ask_groq(sys_p,f"Welcome new person who said: '{txt}'. They are new, welcome to Kenyan Chair For All, inclusive, warm. Inside double quotes.",150) or 'Karibu sana! One Kenyan Chair For All, and today this one is yours. Kenya Me, Kenyan You, karibu'
+              return ask_groq(prompts["welcome_prompt"], f"Welcome new person who said: '{txt}'. They are new to One Kenyan Chair For All. Inside double quotes.",150) or 'Karibu sana! One Kenyan Chair For All, and today this one is yours. Kenya Me, Kenyan You, karibu'
             else:
-              sys_p='You are warm Kenyan healer. Reply inside double quotes only, 12-18 words, 1 emoji, ends with question. Supportive.'
-              return ask_groq(sys_p,f"Reply to: '{txt}'. Inside double quotes.",150) or 'Asante sana for sharing. You help our community heal together'
+              return ask_groq(prompts["heal_prompt"], f"Reply to: '{txt}'. If question like how often, answer 3 times daily. Inside double quotes.",150) or 'Asante sana for sharing. You help our community heal together'
+
           now=datetime.datetime.now()
-          should_post=(now.hour%3==0 and now.minute<20)
-          print(f"UTC hour {now.hour} minute {now.minute} should_post={should_post}")
+          should_post=(now.hour%3==0 and now.minute<30)
+          print(f"UTC hour {now.hour} minute {now.minute} should_post={should_post} avg_likes={perf.get('avg_likes',0)}")
           if should_post:
-            topics=['one Kenyan chair for all inclusivity','kindness is revolutionary','boundaries protect peace','self-worth','mental health ok not ok','forgiveness freedom','community healing','words have power','rest is productive']
+            topics=['one Kenyan chair for all inclusivity','kindness is revolutionary','boundaries protect peace','self-worth','mental health ok not ok','forgiveness freedom','community healing','words have power','rest is productive','Kenya Me Kenyan You unity','Eldoret hospitality karibu']
             avail=[t for t in topics if t not in learned[-5:]]
             chosen=random.choice(avail or topics)
             learned.append(chosen)
             if len(learned)>30: learned.pop(0)
-            post_text=ask_groq('You are REAL Satisfaction AI. Warm healer inclusive. Answer inside double quotes only, 18-24 words, 1-2 emojis, ends with question.',f'Create Facebook post about {chosen}. Inclusive Kenyan spirit. Inside quotes.',300)
+            post_text=ask_groq(prompts["post_prompt"], f"Create Facebook post about {chosen}. Inclusive Kenyan spirit. Current avg likes {perf.get('avg_likes',0)}. Make more viral if low. Inside quotes.",300)
             print(f"FINAL POST: {post_text}")
             if post_text:
-              final_fb=f"{post_text}? 🌱🇰🇪 #OneKenyanChair #RealSatisfaction"
+              final_fb=f"{post_text}? 🌱🇰🇪 #OneKenyanChair #RealSatisfaction #KenyaMeKenyanYou"
               fb=requests.post(f'https://graph.facebook.com/v20.0/{pid}/feed',data={'message':final_fb,'access_token':pt}).json()
               print(f"FB Post: {fb}")
-          else:
-            print('Skip post this run')
+
           try:
             posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'limit':5}).json().get('data',[])
             for p in posts:
@@ -98,9 +171,11 @@ jobs:
                 print(f'COMMENT REPLY new={is_new_user} to {txt[:40]} => {reply}')
                 requests.post(f'https://graph.facebook.com/v20.0/{cid}/comments',data={'message':reply+'?','access_token':pt})
                 memory.append(cid)
+                prompts["total_replies"]=prompts.get("total_replies",0)+1
                 if uid and uid not in known: known.append(uid)
           except Exception as e:
             print(f'comment error: {e}')
+
           try:
             convs=requests.get(f'https://graph.facebook.com/v20.0/{pid}/conversations',params={'access_token':pt,'fields':'id,messages{{id,message,from}}','limit':10}).json().get('data',[])
             for conv in convs[:10]:
@@ -120,25 +195,29 @@ jobs:
               else:
                 rep=ai_reply(dm, is_new=is_new_user)
               print(f'INBOX REPLY new={is_new_user} to {dm[:40]} => {rep}')
-              requests.post(f'https://graph.facebook.com/v20.0/{conv["id"]}/messages',data={'message':rep+'?','access_token':pt})
+              requests.post(f'https://graph.facebook.com/v20.0/{conv['id']}/messages',data={'message':rep+'?','access_token':pt})
               inbox_mem.append(mid)
+              prompts["total_replies"]=prompts.get("total_replies",0)+1
               if uid and uid not in known: known.append(uid)
           except Exception as e:
             print(f'inbox error: {e}')
+
           try:
             open(mem_file,'w').write(json.dumps(memory[-300:]))
             open(inbox_file,'w').write(json.dumps(inbox_mem[-300:]))
             open(learn_file,'w').write(json.dumps(learned))
             open(users_file,'w').write(json.dumps(known[-500:]))
+            open(prompt_file,'w').write(json.dumps(prompts, indent=2))
+            open(perf_file,'w').write(json.dumps(perf, indent=2))
             subprocess.run(['git','config','user.name','bot'])
             subprocess.run(['git','config','user.email','bot@real.local'])
-            subprocess.run(['git','add',mem_file,inbox_file,learn_file,users_file])
+            subprocess.run(['git','add',mem_file,inbox_file,learn_file,users_file,prompt_file,perf_file])
             st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
             if st:
-              subprocess.run(['git','commit','-m','V3.7 inclusive chair'],check=True)
+              subprocess.run(['git','commit','-m',f'V5.0 perf {perf.get("avg_likes",0):.1f} likes'],check=True)
               subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{os.getenv("GITHUB_REPOSITORY")}.git','HEAD:main'],check=True)
-              print('Memory saved V3.7')
+              print(f'Memory saved V5.0 run {prompts["evolution_count"]} perf {perf.get("avg_likes",0)}')
             else:
-              print('No new memory to save - clean')
+              print('No new memory - clean')
           except Exception as e:
             print(f'git: {e}')
