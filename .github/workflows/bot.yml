@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V3.1 REAL AI - Leak Proof + Comments + Inbox
+      - name: V3.2 REAL AI - Leak Proof + Comments + Inbox - FIXED
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -46,6 +46,7 @@ jobs:
           LEAK = ["Answer inside double quotes", "18-24 words", "1-2 emojis", "ends with a question"]
           
           def is_clean(text):
+            if not text: return False
             low=text.lower()
             if any(w in low for w in BANNED): return False
             if any(p.lower() in low for p in LEAK): return False
@@ -57,41 +58,48 @@ jobs:
             try:
               r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":model,"messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":300},timeout=40)
               j=r.json()
+              # DEBUG FULL RESPONSE TO SEE ERROR
+              print(f"FULL GROQ: {str(j)[:800]}")
+              if "choices" not in j:
+                print(f"GROQ API ERROR: {j}")
+                return ""
               raw=j["choices"][0]["message"].get("content") or ""
               print(f"RAW {model}: {raw[:400]}")
-              # LEAK BLOCK
               if not is_clean(raw):
-                print("LEAK DETECTED - BLOCKED")
+                print("LEAK BLOCKED")
                 return ""
               m=re.search(r'"([^"]{10,400})"',raw,re.DOTALL)
               final=m.group(1).strip() if m else ""
-              # If no quotes found, don't post raw - force regenerate
-              if not final or not is_clean(final):
-                print("No valid quoted content")
+              if not final:
+                print("No quoted text found, blocking")
                 return ""
-              return final.strip().rstrip("?")
+              if not is_clean(final):
+                return ""
+              return final.strip().rstrip("?").strip()
             except Exception as e:
               print(f"err {model}: {e}")
               return ""
           
-          # 0. TOKEN AUTO-REFRESH CHECK
+          # 0. TOKEN AUTO-REFRESH
           try:
             debug_url=f"https://graph.facebook.com/debug_token?input_token={pt}&access_token={app_id}|{app_secret}"
             info=requests.get(debug_url).json()
             expires=info.get("data",{}).get("expires_at",0)
             now_ts=datetime.datetime.now().timestamp()
             if expires and expires - now_ts < 864000:
-              print("TOKEN EXPIRING SOON - Exchanging...")
+              print("TOKEN EXPIRING SOON - Refreshing...")
               ex_url=f"https://graph.facebook.com/v18.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app_id}&client_secret={app_secret}&fb_exchange_token={pt}"
               new_t=requests.get(ex_url).json().get("access_token")
-              if new_t:
-                print(f"NEW TOKEN GENERATED: {new_t[:30]}... SAVE TO SECRETS!")
+              if new_t: print(f"NEW TOKEN: {new_t[:30]}... SAVE TO SECRETS!")
+            else:
+              print("Token OK")
           except Exception as e:
-            print(f"token refresh skip: {e}")
+            print(f"token check skip: {e}")
           
-          # 1. POST ONLY EVERY 3 HOURS (but workflow runs every 15 min)
+          # 1. POST EVERY 3 HOURS
           now=datetime.datetime.now()
           should_post = (now.hour % 3 == 0 and now.minute < 20)
+          print(f"Current UTC hour {now.hour}, minute {now.minute}, should_post={should_post}")
           
           if should_post:
             topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
@@ -101,9 +109,9 @@ jobs:
             if len(learned)>30: learned.pop(0)
             open(learn_file,"w").write(json.dumps(learned))
             print(f"Researching: {chosen}")
-            post_text=ask(SYSTEM, f"Create Facebook post about {chosen}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "llama-3.1-8b-instant")
+            post_text=ask(SYSTEM, f"Create Facebook post about {chosen}. Positive impact. 18 words 2 emojis 2 hashtags #RealSatisfaction #Healing. Inside quotes.", "llama-3.3-70b-versatile")
             if not post_text:
-              post_text=ask(SYSTEM, f"Create about {chosen}. Positive impact. Inside quotes.", "openai/gpt-oss-20b")
+              post_text=ask(SYSTEM, f"Create Facebook post about {chosen}. Inside quotes.", "llama-3.1-8b-instant")
             print(f"FINAL POST: {post_text}")
             if post_text and len(post_text)>15:
               final_fb = f"{post_text}? 🌱🤝 #RealSatisfaction #Healing"
@@ -111,9 +119,9 @@ jobs:
               fb=requests.post(url,data={"message":final_fb,"access_token":pt}).json()
               print(f"FB Post Result: {fb}")
           else:
-            print(f"Skip post this run (hour {now.hour})")
+            print(f"Skip post this run")
           
-          # 2. REPLY COMMENTS - NEVER TWICE
+          # 2. REPLY COMMENTS
           try:
             posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts",params={"access_token":pt,"limit":5}).json()
             for p in posts.get("data",[]):
@@ -125,7 +133,9 @@ jobs:
                 if c.get("from",{}).get("id")==pid: continue
                 ctext=c.get("message","")
                 if not ctext: continue
-                reply=ask("You are warm healer replying to Facebook comment. Inside quotes 12-18 words, 1 emoji, question.", f"Reply empathetically to: '{ctext}'. Inside quotes.", "llama-3.1-8b-instant")
+                reply=ask("You are warm healer replying to Facebook comment. Inside quotes 12-18 words, 1 emoji, question.", f"Reply empathetically to: '{ctext}'. Inside quotes.", "llama-3.3-70b-versatile")
+                if not reply:
+                  reply=ask("You are warm healer. Inside quotes 12-18 words, 1 emoji, question.", f"Reply to: '{ctext}'. Inside quotes.", "llama-3.1-8b-instant")
                 if reply and is_clean(reply):
                   url2="https://graph.facebook.com/v20.0/"+cid+"/comments"
                   r2=requests.post(url2,data={"message":reply,"access_token":pt}).json()
@@ -135,7 +145,7 @@ jobs:
           except Exception as e:
             print(f"comment error: {e}")
           
-          # 3. REPLY INBOX DM - NEW
+          # 3. REPLY INBOX
           try:
             conv_url=f"https://graph.facebook.com/v20.0/{pid}/conversations"
             convs=requests.get(conv_url,params={"access_token":pt,"fields":"id,messages{id,message,from}","limit":10}).json()
@@ -146,9 +156,7 @@ jobs:
               mid=last["id"]
               if mid in inbox_mem: continue
               if last.get("from",{}).get("id")==pid: continue
-              inbox_text=last.get("message","")
-              # adaptive
-              low=inbox_text.lower()
+              low=last.get("message","").lower()
               if "stress" in low or "sad" in low:
                 reply_inbox="Pole sana mkuu, niko hapa. Your quiet presence matters. Tuongee kidogo?"
               elif "help" in low or "msaada" in low:
@@ -163,7 +171,7 @@ jobs:
           except Exception as e:
             print(f"inbox error: {e}")
           
-          # 4. SAVE ALL MEMORY
+          # 4. SAVE MEMORY
           try:
             open(mem_file,"w").write(json.dumps(memory))
             open(inbox_file,"w").write(json.dumps(inbox_mem))
@@ -171,7 +179,7 @@ jobs:
             subprocess.run(["git","config","user.name","bot"],check=True)
             subprocess.run(["git","config","user.email","bot@real.local"],check=True)
             subprocess.run(["git","add",mem_file,inbox_file,learn_file],check=True)
-            subprocess.run(["git","commit","-m","V3.1 leak-proof + inbox + memory"],check=True)
+            subprocess.run(["git","commit","-m","V3.2 leak-proof + inbox + fixed model"],check=True)
             subprocess.run(["git","push",f"https://x-access-token:{gh}@github.com/{os.getenv('GITHUB_REPOSITORY')}.git","HEAD:main"],check=True)
             print("Memory saved")
           except Exception as e:
