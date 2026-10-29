@@ -43,7 +43,7 @@ jobs:
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
           
           BANNED = ["mjinga", "umbwa", "meffi"]
-          LEAK = ["Answer inside double quotes", "18-24 words", "1-2 emojis", "ends with a question"]
+          LEAK = ["Answer inside double quotes", "18-24 words", "1-2 emojis"]
           
           def is_clean(text):
             if not text: return False
@@ -58,7 +58,6 @@ jobs:
             try:
               r=requests.post("https://api.groq.com/openai/v1/chat/completions",headers={"Authorization":f"Bearer {gk}","Content-Type":"application/json"},json={"model":model,"messages":[{"role":"system","content":sys},{"role":"user","content":usr}],"max_tokens":300},timeout=40)
               j=r.json()
-              # DEBUG FULL RESPONSE TO SEE ERROR
               print(f"FULL GROQ: {str(j)[:800]}")
               if "choices" not in j:
                 print(f"GROQ API ERROR: {j}")
@@ -80,7 +79,7 @@ jobs:
               print(f"err {model}: {e}")
               return ""
           
-          # 0. TOKEN AUTO-REFRESH
+          # TOKEN AUTO-REFRESH
           try:
             debug_url=f"https://graph.facebook.com/debug_token?input_token={pt}&access_token={app_id}|{app_secret}"
             info=requests.get(debug_url).json()
@@ -96,10 +95,10 @@ jobs:
           except Exception as e:
             print(f"token check skip: {e}")
           
-          # 1. POST EVERY 3 HOURS
+          # POST EVERY 3 HOURS
           now=datetime.datetime.now()
           should_post = (now.hour % 3 == 0 and now.minute < 20)
-          print(f"Current UTC hour {now.hour}, minute {now.minute}, should_post={should_post}")
+          print(f"UTC hour {now.hour}, minute {now.minute}, should_post={should_post}")
           
           if should_post:
             topics=["why kindness is revolutionary","how setting boundaries protects peace","self-worth when you feel behind","mental health its okay to not be okay","forgiveness as freedom","community healing checking on silent friends","words have power speak life","rest is productive","empathy listening to understand"]
@@ -119,9 +118,9 @@ jobs:
               fb=requests.post(url,data={"message":final_fb,"access_token":pt}).json()
               print(f"FB Post Result: {fb}")
           else:
-            print(f"Skip post this run")
+            print("Skip post this run")
           
-          # 2. REPLY COMMENTS
+          # REPLY COMMENTS
           try:
             posts=requests.get(f"https://graph.facebook.com/v20.0/{pid}/posts",params={"access_token":pt,"limit":5}).json()
             for p in posts.get("data",[]):
@@ -145,7 +144,7 @@ jobs:
           except Exception as e:
             print(f"comment error: {e}")
           
-          # 3. REPLY INBOX
+          # REPLY INBOX DM
           try:
             conv_url=f"https://graph.facebook.com/v20.0/{pid}/conversations"
             convs=requests.get(conv_url,params={"access_token":pt,"fields":"id,messages{id,message,from}","limit":10}).json()
@@ -171,7 +170,7 @@ jobs:
           except Exception as e:
             print(f"inbox error: {e}")
           
-          # 4. SAVE MEMORY
+          # SAVE MEMORY
           try:
             open(mem_file,"w").write(json.dumps(memory))
             open(inbox_file,"w").write(json.dumps(inbox_mem))
