@@ -16,37 +16,112 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V3.4.1 AI REPLY - Fixed Save
+      - name: V3.5 FINAL
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_APP_ID: ${{ secrets.FB_APP_ID }}
-          FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          import os, requests, re, json, random, subprocess, datetime
-          gk=os.getenv("GROQ_API_KEY")
-          pt=os.getenv("FB_PAGE_ACCESS_TOKEN")
-          pid=os.getenv("FB_PAGE_ID")
-          gh=os.getenv("GH_TOKEN")
-          
-          mem_file="replied_comments.json"
-          inbox_file="replied_inbox.json"
-          learn_file="learned_topics.json"
-          
+          import os,requests,re,json,random,subprocess,datetime
+          gk=os.getenv('GROQ_API_KEY')
+          pt=os.getenv('FB_PAGE_ACCESS_TOKEN')
+          pid=os.getenv('FB_PAGE_ID')
+          gh=os.getenv('GH_TOKEN')
+          mem_file='replied_comments.json'
+          inbox_file='replied_inbox.json'
+          learn_file='learned_topics.json'
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           inbox_mem=json.load(open(inbox_file)) if os.path.exists(inbox_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          
           def is_clean(t):
-              if not t: return False
-              low=t.lower()
-              if "answer inside double quotes" in low: return False
-              if "18-24 words" in low: return False
-              if "mjinga" in low or "umbwa" in low: return False
-              return True
-          
-          def ask_groq(sys_prompt, user_prompt, max_t=300):
-              MODELS=["openai/g
+            if not t: return False
+            low=t.lower()
+            return 'answer inside' not in low and 'mjinga' not in low
+          def ask_groq(sys_p,user_p,max_t=300):
+            for model in ['openai/gpt-oss-20b','openai/gpt-oss-120b']:
+              try:
+                r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':model,'messages':[{'role':'system','content':sys_p},{'role':'user','content':user_p}],'max_tokens':max_t},timeout=40)
+                j=r.json()
+                print(f"TRY {model}: {str(j)[:600]}")
+                if 'choices' not in j: continue
+                raw=j['choices'][0]['message'].get('content') or ''
+                m=re.search(r'"([^"]{10,400})"',raw,re.DOTALL)
+                final=m.group(1).strip() if m else raw.strip()[:350]
+                final=final.strip().rstrip('?').strip()
+                if is_clean(final) and len(final)>10:
+                  print(f"SUCCESS: {final}")
+                  return final
+              except Exception as e:
+                print(f"err {model}: {e}")
+            return ''
+          def ai_reply(txt):
+            sys_p='You are warm Kenyan healer. Reply inside double quotes only, 12-18 words, 1 emoji, ends with question. Supportive.'
+            return ask_groq(sys_p,f"Reply to: '{txt}'. Inside double quotes.",150) or 'Asante sana for sharing. You help our community heal together'
+          now=datetime.datetime.now()
+          should_post=(now.hour%3==0 and now.minute<20)
+          print(f"UTC hour {now.hour} minute {now.minute} should_post={should_post}")
+          if should_post:
+            topics=['kindness is revolutionary','boundaries protect peace','self-worth','mental health ok not ok','forgiveness freedom','community healing','words have power','rest is productive']
+            avail=[t for t in topics if t not in learned[-5:]]
+            chosen=random.choice(avail or topics)
+            learned.append(chosen)
+            if len(learned)>30: learned.pop(0)
+            post_text=ask_groq('You are REAL Satisfaction AI. Warm healer. Answer inside double quotes only, 18-24 words, 1-2 emojis, ends with question.',f'Create post about {chosen}. Inside quotes.',300)
+            print(f"FINAL POST: {post_text}")
+            if post_text:
+              final_fb=f"{post_text}? 🌱🤝 #RealSatisfaction #Healing"
+              fb=requests.post(f'https://graph.facebook.com/v20.0/{pid}/feed',data={'message':final_fb,'access_token':pt}).json()
+              print(f"FB Post: {fb}")
+          else:
+            print('Skip post this run')
+          try:
+            posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'limit':5}).json().get('data',[])
+            for p in posts:
+              comms=requests.get(f'https://graph.facebook.com/v20.0/{p["id"]}/comments',params={'access_token':pt,'fields':'id,message,from','limit':20}).json().get('data',[])
+              for c in comms:
+                cid=c['id']
+                if cid in memory: continue
+                if c.get('from',{}).get('id')==pid: continue
+                txt=c.get('message','')
+                if not txt: continue
+                reply=ai_reply(txt)
+                print(f'COMMENT REPLY to {txt[:40]} => {reply}')
+                requests.post(f'https://graph.facebook.com/v20.0/{cid}/comments',data={'message':reply+'?','access_token':pt})
+                memory.append(cid)
+          except Exception as e:
+            print(f'comment error: {e}')
+          try:
+            convs=requests.get(f'https://graph.facebook.com/v20.0/{pid}/conversations',params={'access_token':pt,'fields':'id,messages{{id,message,from}}','limit':10}).json().get('data',[])
+            for conv in convs[:10]:
+              msgs=conv.get('messages',{}).get('data',[])
+              if not msgs: continue
+              last=msgs[0]
+              mid=last['id']
+              if mid in inbox_mem: continue
+              if last.get('from',{}).get('id')==pid: continue
+              dm=last.get('message','')
+              if not dm: continue
+              rep=ai_reply(dm)
+              print(f'INBOX REPLY to {dm[:40]} => {rep}')
+              requests.post(f'https://graph.facebook.com/v20.0/{conv["id"]}/messages',data={'message':rep+'?','access_token':pt})
+              inbox_mem.append(mid)
+          except Exception as e:
+            print(f'inbox error: {e}')
+          try:
+            open(mem_file,'w').write(json.dumps(memory[-300:]))
+            open(inbox_file,'w').write(json.dumps(inbox_mem[-300:]))
+            open(learn_file,'w').write(json.dumps(learned))
+            subprocess.run(['git','config','user.name','bot'])
+            subprocess.run(['git','config','user.email','bot@real.local'])
+            subprocess.run(['git','add',mem_file,inbox_file,learn_file])
+            st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
+            if st:
+              subprocess.run(['git','commit','-m','V3.5'],check=True)
+              subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{os.getenv("GITHUB_REPOSITORY")}.git','HEAD:main'],check=True)
+              print('Memory saved V3.5')
+            else:
+              print('No new memory to save - clean')
+          except Exception as e:
+            print(f'git: {e}')
