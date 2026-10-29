@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V5.3 SELF-HEALING BUILDER
+      - name: V5.4 VIRAL BUILDER FIX
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -37,33 +37,27 @@ jobs:
             "welcome_prompt": "You are warm Kenyan host from Eldoret, One Kenyan Chair For All, inclusive of all tribes. Reply inside double quotes only, 16-22 words, 1 emoji, ends with question. Must say 'Karibu sana! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You'.",
             "heal_prompt": "You are REAL Satisfaction, warm Kenyan healer. Answer direct question clearly first, then supportive. Reply inside double quotes only, 15-22 words, 1 emoji, ends with question. If they ask 'how often' say '3 times daily, karibu'.",
             "post_prompt": "You are REAL Satisfaction viral writer for Kenya. Create POST that gets likes: start with relatable Kenyan story or bold question, add practical tip, include 'One Kenyan Chair For All' and 'Karibu'. Answer inside double quotes only, 20-26 words, 2 emojis, ends with engaging question like 'Unakubali?' or 'Uko tayari?'. Never generic.",
-            "builder_prompt": "You are Prompt Engineer. Write BETTER SYSTEM PROMPT for Kenyan bot. Output must start with 'You are' and include 'Karibu' and 'inside double quotes only'. Under 50 words.",
+            "builder_prompt": "You are viral prompt creator. Create a NEW Facebook viral post SYSTEM PROMPT. It must start with 'You are REAL Satisfaction viral writer for Kenya.' Include 'One Kenyan Chair For All', 'Karibu', 'inside double quotes only', '20-26 words', '2 emojis', 'Unakubali?'. Under 50 words.",
             "evolution_count": 0, "total_replies": 0, "last_evolution": "none", "evolution_reason": "init"
           }
           prompts=json.load(open(prompt_file)) if os.path.exists(prompt_file) else default_prompts
-          # SELF-HEAL CORRUPTED PROMPTS
-          for key in ["post_prompt","welcome_prompt","heal_prompt"]:
-            val=prompts.get(key,"")
-            if not val.startswith("You are") or "I once sat" in val or len(val) < 30 or "cramped chair" in val:
-              print(f"HEALING corrupted {key}: {val[:60]} -> resetting to default")
-              prompts[key]=default_prompts[key]
+          # V5.4 HEAL: post_prompt must be viral writer, not engineer, not story
+          pp=prompts.get("post_prompt","")
+          if not pp.startswith("You are REAL Satisfaction") or "Prompt Engineer" in pp or "I once sat" in pp or "cramped chair" in pp:
+            print(f"HEALING post_prompt was: {pp[:80]} -> resetting")
+            prompts["post_prompt"]=default_prompts["post_prompt"]
           for k in default_prompts:
             if k not in prompts: prompts[k]=default_prompts[k]
 
           def is_clean(t):
             if not t: return False
             low=t.lower()
-            return 'answer inside' not in low and 'mjinga' not in low and 'rewrite to be more viral' not in low
+            return 'answer inside' not in low and 'mjinga' not in low
 
-          def is_valid_prompt(p):
-            if not p: return False
-            if not p.strip().startswith("You are"): return False
-            if "Karibu" not in p: return False
-            if "I once sat" in p: return False
-            if len(p) < 40 or len(p) > 350: return False
-            return True
+          def is_valid_post_prompt(p):
+            return p.startswith("You are REAL Satisfaction") and "Karibu" in p and "One Kenyan Chair" in p and 40 < len(p) < 400 and "Prompt Engineer" not in p
 
-          def ask_groq(sys_p,user_p,max_t=350):
+          def ask_groq(sys_p,user_p,max_t=400):
             for model in ['openai/gpt-oss-20b','openai/gpt-oss-120b']:
               try:
                 r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':model,'messages':[{'role':'system','content':sys_p},{'role':'user','content':user_p}],'max_tokens':max_t},timeout=40)
@@ -74,16 +68,18 @@ jobs:
                 raw=choice['message'].get('content') or ""
                 if not raw or len(raw.strip())<10:
                   raw=choice['message'].get('reasoning') or choice.get('reasoning') or raw
-                # Extract all quoted strings, pick one that looks like a system prompt
-                matches=re.findall(r'"([^"]{30,400})"',raw,re.DOTALL)
+                matches=re.findall(r'"([^"]{40,500})"',raw,re.DOTALL)
                 final=""
                 for m in reversed(matches):
-                  if m.strip().startswith("You are") and "Karibu" in m:
+                  if m.startswith("You are REAL Satisfaction") and "Karibu" in m:
                     final=m; break
                 if not final:
-                  final=matches[-1] if matches else raw.strip()[:400]
+                  # find first that starts correctly without quotes
+                  mm=re.search(r'You are REAL Satisfaction[^"]{30,300}',raw)
+                  if mm: final=mm.group(0)
+                  else: final=matches[-1] if matches else raw.strip()[:400]
                 final=final.strip().rstrip('?').strip().replace('\n',' ')
-                if is_clean(final) and len(final)>20:
+                if is_clean(final) and len(final)>30:
                   print(f"SUCCESS: {final}")
                   return final
               except Exception as e:
@@ -115,18 +111,21 @@ jobs:
             should_evolve=False; target="post_prompt"; instruction=""
             if "LOW" in reason:
               should_evolve=True; target="post_prompt"
-              instruction=f"Current post_prompt: '{prompts['post_prompt']}'. It gets LOW likes {avg_likes}. Rewrite to be MORE VIRAL: Start with bold Kenyan question, include personal story hook, include 'One Kenyan Chair For All' and 'Karibu', end with call to action 'Unakubali?'. Must start with 'You are'."
+              instruction=f"Current viral prompt gets LOW likes {avg_likes}: '{prompts['post_prompt']}'. Create NEW better viral prompt. Must start with 'You are REAL Satisfaction viral writer for Kenya.' Must include One Kenyan Chair For All, Karibu, 20-26 words, 2 emojis, end with Unakubali? Make it more catchy, story hook, bold question."
             elif count % 20 == 0:
               should_evolve=True; target="welcome_prompt"
-              instruction=f"Current welcome: '{prompts['welcome_prompt']}'. Avg likes {avg_likes}. Make warmer, inclusive for all tribes, convert visitor to follower. Must start with 'You are' and keep 'Kenyan Chair For All' and 'Karibu'."
+              instruction=f"Current welcome: '{prompts['welcome_prompt']}'. Avg likes {avg_likes}. Make warmer, inclusive for all tribes. Must keep 'Kenyan Chair For All' and 'Karibu'. 16-22 words."
             if should_evolve:
               print(f"EVOLVING {target} because: {reason}")
-              new_prompt=ask_groq(prompts["builder_prompt"], instruction, 350)
-              if is_valid_prompt(new_prompt):
+              new_prompt=ask_groq(prompts["builder_prompt"], instruction, 400)
+              if target=="post_prompt" and is_valid_post_prompt(new_prompt):
+                prompts[target]=new_prompt; prompts["last_evolution"]=f"Run {count}: {target} evolved"; prompts["evolution_reason"]=reason
+                print(f"EVOLVED {target} -> {new_prompt}")
+              elif target!="post_prompt" and len(new_prompt)>30:
                 prompts[target]=new_prompt; prompts["last_evolution"]=f"Run {count}: {target} evolved"; prompts["evolution_reason"]=reason
                 print(f"EVOLVED {target} -> {new_prompt}")
               else:
-                print(f"REJECTED invalid evolution: {new_prompt[:100]}")
+                print(f"REJECTED invalid: {new_prompt[:120]}")
 
           builder_agent()
           def ai_reply(txt, is_new=False):
@@ -195,9 +194,9 @@ jobs:
             subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local']); subprocess.run(['git','add',mem_file,inbox_file,learn_file,users_file,prompt_file,perf_file])
             st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
             if st:
-              subprocess.run(['git','commit','-m',f'V5.3 heal perf {perf.get("avg_likes",0):.1f} run {prompts["evolution_count"]}'],check=True)
+              subprocess.run(['git','commit','-m',f'V5.4 heal viral perf {perf.get("avg_likes",0):.1f} run {prompts["evolution_count"]}'],check=True)
               subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{os.getenv("GITHUB_REPOSITORY")}.git','HEAD:main'],check=True)
-              print(f'Memory saved V5.3 run {prompts["evolution_count"]} perf {perf.get("avg_likes",0)}')
+              print(f'Memory saved V5.4 run {prompts["evolution_count"]} perf {perf.get("avg_likes",0)}')
             else:
               print('No new memory - clean')
           except Exception as e:
