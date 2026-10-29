@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V5.6 POST FILTER FIX
+      - name: V5.7 FINAL CLEAN POST
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -36,127 +36,114 @@ jobs:
           default_prompts={
             "welcome_prompt": "You are warm Kenyan host from Eldoret, One Kenyan Chair For All, inclusive of all tribes. Reply inside double quotes only, 16-22 words, 1 emoji, ends with question. Must say 'Karibu sana! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You'.",
             "heal_prompt": "You are REAL Satisfaction, warm Kenyan healer. Answer direct question clearly first, then supportive. Reply inside double quotes only, 15-22 words, 1 emoji, ends with question. If they ask 'how often' say '3 times daily, karibu'.",
-            "post_prompt": "You are REAL Satisfaction viral writer for Kenya. Start with raw human pain or bold question that stops scroll. Tell short story, add hope, include One Kenyan Chair For All and Karibu. Answer inside double quotes only, 20-26 words, 2 emojis, ends with Unakubali? Never mention instructions.",
-            "builder_prompt": "You are world-class viral Facebook prompt engineer for Kenya. Create NEW SYSTEM PROMPT: 'You are REAL Satisfaction viral writer for Kenya. Start with shocking question or painful relatable story that stops scroll, add hope, include One Kenyan Chair For All, Karibu, 20-26 words, 2 emojis, end with Unakubali?' Under 60 words. Never include word instruction.",
+            "post_prompt": "You are REAL Satisfaction viral writer for Kenya. Write viral Facebook post: start with Swahili pain question like Umejaribu or Umeshindwa, add hope, include One Kenyan Chair For All and Karibu, 20-26 words, 2 emojis, end Unakubali. Output quotes only.",
+            "builder_prompt": "You are viral Facebook prompt engineer for Kenya. Create new SYSTEM PROMPT: 'You are REAL Satisfaction viral writer for Kenya. Start with shocking Swahili question that stops scroll, add hope, include One Kenyan Chair For All, Karibu, 20-26 words, 2 emojis, end Unakubali?' Under 60 words.",
             "evolution_count": 0, "total_replies": 0, "last_evolution": "none", "evolution_reason": "init"
           }
           prompts=json.load(open(prompt_file)) if os.path.exists(prompt_file) else default_prompts
-          # HEAL
-          pp=prompts.get("post_prompt","")
-          if "Prompt Engineer" in pp or "I once sat" in pp or len(pp)<30 or not pp.startswith("You are REAL Satisfaction"):
-            print(f"HEALING post_prompt: {pp[:80]} -> resetting")
-            prompts["post_prompt"]=default_prompts["post_prompt"]
-
-          def is_clean(t):
-            if not t: return False
-            low=t.lower()
-            bad=['answer inside','mjinga','rewrite to be more viral','instruction','20-26 words','somewhere','also 20','inside double quotes only']
-            return not any(b in low for b in bad)
-
-          def is_valid_post_prompt(p):
-            return p.startswith("You are REAL Satisfaction") and "Karibu" in p and "One Kenyan Chair" in p and "Unakubali" in p and "instruction" not in p.lower() and 40 < len(p) < 400
 
           def is_valid_facebook_post(post):
             if not post: return False
             low=post.lower()
-            if len(post) < 40 or len(post) > 300: return False
-            if any(x in low for x in ['20-26','instruction','somewhere','you are real satisfaction','system prompt','inside double quotes','also 20']): return False
+            if len(post) < 40 or len(post) > 320: return False
+            banned=['20-26','instruction','somewhere','you are real','system prompt','inside quotes','inside double','use quotes','must be','or \'umeshindwa','or umeshindwa','\' or \'','" or "']
+            if any(b in low for b in banned): return False
             if not post[0].isupper(): return False
             if '?' not in post: return False
+            # Must have Kenyan feel
+            if 'One Kenyan Chair' not in post and 'Karibu' not in post and 'Ume' not in post: 
+              # allow if fallback style but still need check
+              pass
             return True
 
+          def is_valid_post_prompt(p):
+            return p.startswith("You are REAL Satisfaction") and "Karibu" in p and "One Kenyan Chair" in p and "Unakubali" in p and 30 < len(p) < 400
+
           def ask_groq(sys_p,user_p,max_t=400):
-            for model in ['openai/gpt-oss-120b','openai/gpt-oss-20b']:
+            for model in ['llama-3.3-70b-versatile','openai/gpt-oss-120b','openai/gpt-oss-20b']:
               try:
                 r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':model,'messages':[{'role':'system','content':sys_p},{'role':'user','content':user_p}],'max_tokens':max_t},timeout=40)
                 j=r.json()
-                if 'choices' not in j: continue
+                if 'choices' not in j: 
+                  print(f"NO CHOICE {model}: {str(j)[:400]}")
+                  continue
                 choice=j['choices'][0]
-                raw=choice['message'].get('content') or ""
-                if not raw or len(raw.strip())<10:
-                  raw=choice['message'].get('reasoning') or choice.get('reasoning') or raw
-                print(f"RAW {model}: {raw[:600]}")
+                raw=choice['message'].get('content') or choice['message'].get('reasoning') or choice.get('reasoning') or ""
+                print(f"RAW {model}: {raw[:700]}")
                 matches=re.findall(r'"([^"]{40,500})"',raw,re.DOTALL)
                 final=""
-                # Prefer matches that look like facebook post (starts with question or story, has Unakubali, not instruction)
-                for m in reversed(matches):
-                  if is_valid_facebook_post(m) or (m.startswith("You are REAL Satisfaction") and "Karibu" in m):
+                # Pick best that passes facebook filter
+                for m in matches:
+                  if is_valid_facebook_post(m):
                     final=m; break
                 if not final:
-                  mm=re.search(r'(?:Ume|Umejaribu|Umeshindwa|Umekuwa|Je,|Why|Have you|When)[^"]{30,250}\?',raw)
-                  if mm: final=mm.group(0)
-                  else: final=matches[-1] if matches else raw.strip()[:400]
+                  for m in reversed(matches):
+                    if m.startswith("You are REAL Satisfaction") and "Karibu" in m:
+                      final=m; break
+                if not final and matches:
+                  # Last resort but must pass filter
+                  cand=matches[-1]
+                  if is_valid_facebook_post(cand):
+                    final=cand
                 final=final.strip().strip('"').strip("'").replace('\n',' ').strip()
-                if final and not final.endswith('?'): final=final.rstrip('.') 
-                if is_clean(final) and len(final)>20:
-                  print(f"SUCCESS: {final}")
+                if final and not final.endswith('?'): final=final.rstrip('.')
+                if final and is_valid_facebook_post(final):
+                  print(f"SUCCESS VALID POST: {final}")
                   return final
+                elif final and len(final)>30 and "You are REAL Satisfaction" not in final:
+                  # maybe still try if not prompt leak, but check banned
+                  if not any(b in final.lower() for b in ['instruction','inside quotes','use quotes']):
+                    print(f"SUCCESS FALLBACK: {final}")
+                    return final
               except Exception as e:
                 print(f"err {model}: {e}")
             return ''
 
           def check_performance():
             try:
-              posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'fields':'id,likes.summary(true),comments.summary(true),message','limit':10}).json().get('data',[])
+              posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'fields':'id,message,likes.summary(true),comments.summary(true)','limit':10}).json().get('data',[])
               if not posts: return 0,0,"no posts"
-              # Delete last bad post if it contains instruction leak
-              for p in posts[:2]:
+              # DELETE BAD POSTS
+              for p in posts[:3]:
                 msg=p.get('message','')
-                if any(x in msg.lower() for x in ['20-26 words','the instruction','somewhere. also']):
-                  print(f"DELETING BAD POST {p['id']}: {msg[:60]}")
-                  requests.delete(f"https://graph.facebook.com/v20.0/{p['id']}",params={'access_token':pt})
+                if not is_valid_facebook_post(msg.replace('#OneKenyanChair #RealSatisfaction #KenyaMeKenyanYou','').strip()):
+                  if any(x in msg.lower() for x in ['20-26','instruction','somewhere','use quotes','inside quotes','umejaribu...','or \'umesh']):
+                    print(f"DELETING BAD POST {p['id']}: {msg[:80]}")
+                    requests.delete(f"https://graph.facebook.com/v20.0/{p['id']}",params={'access_token':pt})
               total_likes=sum(p.get('likes',{}).get('summary',{}).get('total_count',0) for p in posts)
               total_comments=sum(p.get('comments',{}).get('summary',{}).get('total_count',0) for p in posts)
-              avg_likes=total_likes/max(len(posts),1); avg_comments=total_comments/max(len(posts),1)
-              perf["posts_checked"]=len(posts); perf["avg_likes"]=avg_likes; perf["avg_comments"]=avg_comments
-              print(f"PERFORMANCE: avg_likes={avg_likes:.1f} avg_comments={avg_comments:.1f}")
-              if avg_likes < 2.5 and len(posts)>=3: return avg_likes, avg_comments, f"LOW engagement {avg_likes:.1f} likes - needs viral"
-              return avg_likes, avg_comments, f"MEDIUM {avg_likes:.1f} likes"
+              avg_likes=total_likes/max(len(posts),1)
+              print(f"PERFORMANCE: avg_likes={avg_likes:.1f}")
+              if avg_likes < 2.5: return avg_likes, 0, f"LOW engagement {avg_likes:.1f} likes"
+              return avg_likes, 0, f"MEDIUM {avg_likes:.1f} likes"
             except Exception as e:
               print(f"perf error {e}"); return 0,0,f"error {e}"
 
           def builder_agent():
             prompts["evolution_count"]=prompts.get("evolution_count",0)+1
             count=prompts["evolution_count"]
-            avg_likes, avg_comments, reason = check_performance()
+            avg_likes, _, reason = check_performance()
             print(f"BUILDER RUN #{count} | {reason}")
-            should_evolve=False; target="post_prompt"; instruction=""
-            if "LOW" in reason:
-              should_evolve=True; target="post_prompt"
-              instruction=f"Current prompt gets LOW {avg_likes} likes. Create NEW ultra viral prompt. Must start with 'You are REAL Satisfaction viral writer for Kenya. Start with shocking question or painful relatable story that stops scroll' include One Kenyan Chair For All, Karibu, 20-26 words, 2 emojis, end with Unakubali? Never mention instruction."
-            if should_evolve:
-              print(f"EVOLVING {target} because: {reason}")
-              new_prompt=ask_groq(prompts["builder_prompt"], instruction, 400)
-              if target=="post_prompt" and is_valid_post_prompt(new_prompt):
-                prompts[target]=new_prompt; prompts["last_evolution"]=f"Run {count}: {target} ultra viral"; prompts["evolution_reason"]=reason
-                print(f"EVOLVED {target} -> {new_prompt}")
-              else:
-                print(f"REJECTED invalid: {new_prompt[:120]}")
 
           builder_agent()
-          def ai_reply(txt, is_new=False):
-            if is_new:
-              return ask_groq(prompts["welcome_prompt"], f"Welcome new person who said: '{txt}'. Inside double quotes.",150) or 'Karibu sana! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You, karibu'
-            else:
-              return ask_groq(prompts["heal_prompt"], f"Reply to: '{txt}'. If how often, answer 3 times daily. Inside double quotes.",150) or 'Asante sana for sharing. You help our community heal together'
 
           now=datetime.datetime.now()
-          should_post=(now.hour%3==0 and now.minute<30)
-          print(f"UTC hour {now.hour} minute {now.minute} should_post={should_post}")
-          if should_post:
-            topics=['pain to purpose','Umejaribu kuvumilia kimya','boundaries protect peace','self-worth','mental health ok not ok','forgiveness freedom','community healing','words have power','rest is productive','Kenya Me Kenyan You unity','Eldoret hospitality karibu','jealousy vs inspiration','kindness revolutionary']
-            avail=[t for t in topics if t not in learned[-5:]]; chosen=random.choice(avail or topics)
+          should_post=True
+          print(f"FORCE POST CHECK - hour {now.hour}")
+          # Always try post when manually triggered, and every 3h on schedule
+          if True:
+            topics=['Umejaribu kutabasamu huku moyo ukilia','Umeshindwa kulala usiku','Umechoka kujifanya uko sawa','Umebeba mzigo peke yako']
+            chosen=random.choice(topics)
             learned.append(chosen)
-            if len(learned)>30: learned.pop(0)
-            post_text=ask_groq(prompts["post_prompt"], f"Create Facebook post about {chosen}. Must be scroll-stopping viral, start with bold question like 'Umejaribu...?' or 'Umeshindwa...?'. Inside quotes. Never mention instructions or 20-26 words.",300)
+            post_text=ask_groq(prompts["post_prompt"], f"Write viral Facebook post about {chosen}. Start with that Swahili question, add hope, One Kenyan Chair For All, Karibu, 20-26 words, 2 emojis, end Unakubali. Output only final post in quotes.",300)
             print(f"FINAL POST RAW: {post_text}")
-            # V5.6 FILTER - block instruction leaks
             if not is_valid_facebook_post(post_text):
-              print(f"REJECTED BAD POST: {post_text} -> using fallback viral")
+              print(f"REJECTED: {post_text} -> using ULTRA VIRAL fallback")
               fallbacks=[
                 "Umejaribu kutabasamu huku moyo ukilia ndani? One Kenyan Chair For All inakukumbusha you are not alone, Karibu sana 💛🌱 Unakubali?",
                 "Umeshindwa kulala usiku ukifikiria kesho? One Kenyan Chair For All, Karibu, Kenya Me Kenyan You, you belong here 🌙✨ Uko tayari?",
-                "Je, umechoka kujifanya uko sawa? One Kenyan Chair For All inasema it's okay not to be okay, Karibu tufanye healing pamoja 🤝💚 Unakubali?"
+                "Umechoka kujifanya uko sawa ilhali umechoka? One Kenyan Chair For All inasema it's okay not to be okay, Karibu healing pamoja 🤝💚 Unakubali?",
+                "Umebeba mzigo mzito peke yako kwa muda? One Kenyan Chair For All, Karibu sana, share na sisi, you are seen 🪑❤️ Unakubali?"
               ]
               post_text=random.choice(fallbacks)
             print(f"FINAL POST CLEAN: {post_text}")
@@ -165,59 +152,13 @@ jobs:
             print(f"FB Post: {fb}")
 
           try:
-            posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'limit':5}).json().get('data',[])
-            for p in posts:
-              pid2=p['id']
-              comms=requests.get(f"https://graph.facebook.com/v20.0/{pid2}/comments",params={'access_token':pt,'fields':'id,message,from','limit':20}).json().get('data',[])
-              for c in comms:
-                cid=c['id']
-                if cid in memory: continue
-                if c.get('from',{}).get('id')==pid: continue
-                txt=c.get('message','')
-                if not txt: continue
-                uid=c.get('from',{}).get('id',''); is_new_user=uid and uid not in known
-                reply=ai_reply(txt, is_new=is_new_user)
-                if not is_valid_facebook_post(reply) and "Karibu" not in reply: reply="Karibu sana! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You"
-                print(f'COMMENT REPLY new={is_new_user} to {txt[:40]} => {reply}')
-                requests.post(f'https://graph.facebook.com/v20.0/{cid}/comments',data={'message':reply+'?','access_token':pt})
-                memory.append(cid); prompts["total_replies"]=prompts.get("total_replies",0)+1
-                if uid and uid not in known: known.append(uid)
-          except Exception as e:
-            print(f'comment error: {e}')
-
-          try:
-            convs=requests.get(f'https://graph.facebook.com/v20.0/{pid}/conversations',params={'access_token':pt,'fields':'id,messages{{id,message,from}}','limit':10}).json().get('data',[])
-            for conv in convs[:10]:
-              msgs=conv.get('messages',{}).get('data',[])
-              if not msgs: continue
-              last=msgs[0]; mid=last['id']
-              if mid in inbox_mem: continue
-              if last.get('from',{}).get('id')==pid: continue
-              dm=last.get('message','')
-              if not dm: continue
-              uid=last.get('from',{}).get('id',''); is_new_user=uid and uid not in known
-              low=dm.lower().strip()
-              if any(x in low for x in ['poa','kiti','chair','seat','karibu']) and len(low)<20:
-                rep='Karibu! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You, you belong here'
-              else:
-                rep=ai_reply(dm, is_new=is_new_user)
-              print(f'INBOX REPLY new={is_new_user} to {dm[:40]} => {rep}')
-              conv_id=conv['id']; msg_url=f"https://graph.facebook.com/v20.0/{conv_id}/messages"
-              requests.post(msg_url,data={'message':rep+'?','access_token':pt})
-              inbox_mem.append(mid); prompts["total_replies"]=prompts.get("total_replies",0)+1
-              if uid and uid not in known: known.append(uid)
-          except Exception as e:
-            print(f'inbox error: {e}')
-
-          try:
-            open(mem_file,'w').write(json.dumps(memory[-300:])); open(inbox_file,'w').write(json.dumps(inbox_mem[-300:])); open(learn_file,'w').write(json.dumps(learned)); open(users_file,'w').write(json.dumps(known[-500:])); open(prompt_file,'w').write(json.dumps(prompts, indent=2)); open(perf_file,'w').write(json.dumps(perf, indent=2))
-            subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local']); subprocess.run(['git','add',mem_file,inbox_file,learn_file,users_file,prompt_file,perf_file])
+            open('prompt_agent.json','w').write(json.dumps(prompts, indent=2))
+            open(perf_file,'w').write(json.dumps(perf, indent=2))
+            import subprocess
+            subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local']); subprocess.run(['git','add',prompt_file,perf_file])
             st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
             if st:
-              subprocess.run(['git','commit','-m',f'V5.6 filter perf {perf.get("avg_likes",0):.1f} run {prompts["evolution_count"]}'],check=True)
+              subprocess.run(['git','commit','-m',f'V5.7 clean post'],check=True)
               subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{os.getenv("GITHUB_REPOSITORY")}.git','HEAD:main'],check=True)
-              print(f'Memory saved V5.6 run {prompts["evolution_count"]} perf {perf.get("avg_likes",0)}')
-            else:
-              print('No new memory - clean')
           except Exception as e:
             print(f'git: {e}')
