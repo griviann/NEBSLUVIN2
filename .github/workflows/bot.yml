@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V5.2 BUILDER - LLAMA FIRST
+      - name: V5.3 SELF-HEALING BUILDER
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -37,37 +37,59 @@ jobs:
             "welcome_prompt": "You are warm Kenyan host from Eldoret, One Kenyan Chair For All, inclusive of all tribes. Reply inside double quotes only, 16-22 words, 1 emoji, ends with question. Must say 'Karibu sana! One Kenyan Chair For All, today this one is yours. Kenya Me, Kenyan You'.",
             "heal_prompt": "You are REAL Satisfaction, warm Kenyan healer. Answer direct question clearly first, then supportive. Reply inside double quotes only, 15-22 words, 1 emoji, ends with question. If they ask 'how often' say '3 times daily, karibu'.",
             "post_prompt": "You are REAL Satisfaction viral writer for Kenya. Create POST that gets likes: start with relatable Kenyan story or bold question, add practical tip, include 'One Kenyan Chair For All' and 'Karibu'. Answer inside double quotes only, 20-26 words, 2 emojis, ends with engaging question like 'Unakubali?' or 'Uko tayari?'. Never generic.",
-            "builder_prompt": "You are Prompt Engineer for Kenyan inclusive bot One Kenyan Chair For All. Write better SYSTEM PROMPT warmer, more inclusive, more Kenyan, more viral. Must include instruction 'inside double quotes only' and 'Karibu'. Keep under 40 words.",
+            "builder_prompt": "You are Prompt Engineer. Write BETTER SYSTEM PROMPT for Kenyan bot. Output must start with 'You are' and include 'Karibu' and 'inside double quotes only'. Under 50 words.",
             "evolution_count": 0, "total_replies": 0, "last_evolution": "none", "evolution_reason": "init"
           }
           prompts=json.load(open(prompt_file)) if os.path.exists(prompt_file) else default_prompts
+          # SELF-HEAL CORRUPTED PROMPTS
+          for key in ["post_prompt","welcome_prompt","heal_prompt"]:
+            val=prompts.get(key,"")
+            if not val.startswith("You are") or "I once sat" in val or len(val) < 30 or "cramped chair" in val:
+              print(f"HEALING corrupted {key}: {val[:60]} -> resetting to default")
+              prompts[key]=default_prompts[key]
           for k in default_prompts:
             if k not in prompts: prompts[k]=default_prompts[k]
+
           def is_clean(t):
             if not t: return False
             low=t.lower()
             return 'answer inside' not in low and 'mjinga' not in low and 'rewrite to be more viral' not in low
-          def ask_groq(sys_p,user_p,max_t=350, prefer_llama=False):
-            models = ["llama-3.3-70b-versatile","llama-3.1-70b-versatile","openai/gpt-oss-20b"] if prefer_llama else ["openai/gpt-oss-20b","openai/gpt-oss-120b","llama-3.3-70b-versatile"]
-            for model in models:
+
+          def is_valid_prompt(p):
+            if not p: return False
+            if not p.strip().startswith("You are"): return False
+            if "Karibu" not in p: return False
+            if "I once sat" in p: return False
+            if len(p) < 40 or len(p) > 350: return False
+            return True
+
+          def ask_groq(sys_p,user_p,max_t=350):
+            for model in ['openai/gpt-oss-20b','openai/gpt-oss-120b']:
               try:
                 r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':model,'messages':[{'role':'system','content':sys_p},{'role':'user','content':user_p}],'max_tokens':max_t},timeout=40)
                 j=r.json()
-                print(f"TRY {model}: {str(j)[:700]}")
+                print(f"TRY {model}: {str(j)[:800]}")
                 if 'choices' not in j: continue
                 choice=j['choices'][0]
                 raw=choice['message'].get('content') or ""
                 if not raw or len(raw.strip())<10:
                   raw=choice['message'].get('reasoning') or choice.get('reasoning') or raw
-                # Take LAST quoted string, not first (avoids catching instruction)
-                matches=re.findall(r'"([^"]{20,500})"',raw,re.DOTALL)
-                final=matches[-1].strip() if matches else raw.strip()[:400]
+                # Extract all quoted strings, pick one that looks like a system prompt
+                matches=re.findall(r'"([^"]{30,400})"',raw,re.DOTALL)
+                final=""
+                for m in reversed(matches):
+                  if m.strip().startswith("You are") and "Karibu" in m:
+                    final=m; break
+                if not final:
+                  final=matches[-1] if matches else raw.strip()[:400]
                 final=final.strip().rstrip('?').strip().replace('\n',' ')
-                if is_clean(final) and 30 < len(final) < 400:
-                  print(f"SUCCESS: {final}"); return final
+                if is_clean(final) and len(final)>20:
+                  print(f"SUCCESS: {final}")
+                  return final
               except Exception as e:
                 print(f"err {model}: {e}")
             return ''
+
           def check_performance():
             try:
               posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'fields':'id,likes.summary(true),comments.summary(true)','limit':10}).json().get('data',[])
@@ -84,6 +106,7 @@ jobs:
               return avg_likes, avg_comments, f"MEDIUM {avg_likes:.1f} likes"
             except Exception as e:
               print(f"perf error {e}"); return 0,0,f"error {e}"
+
           def builder_agent():
             prompts["evolution_count"]=prompts.get("evolution_count",0)+1
             count=prompts["evolution_count"]
@@ -92,17 +115,19 @@ jobs:
             should_evolve=False; target="post_prompt"; instruction=""
             if "LOW" in reason:
               should_evolve=True; target="post_prompt"
-              instruction=f"Current post_prompt gets LOW likes {avg_likes}: '{prompts['post_prompt']}'. Rewrite to be MORE VIRAL: Start with bold Kenyan question, include personal story hook, include 'One Kenyan Chair For All' and 'Karibu', end with call to action 'Unakubali?'. 20-26 words, 2 emojis."
+              instruction=f"Current post_prompt: '{prompts['post_prompt']}'. It gets LOW likes {avg_likes}. Rewrite to be MORE VIRAL: Start with bold Kenyan question, include personal story hook, include 'One Kenyan Chair For All' and 'Karibu', end with call to action 'Unakubali?'. Must start with 'You are'."
             elif count % 20 == 0:
               should_evolve=True; target="welcome_prompt"
-              instruction=f"Current welcome: '{prompts['welcome_prompt']}'. Avg likes {avg_likes}. Make warmer, inclusive for all tribes, convert visitor to follower. Must keep 'Kenyan Chair For All' and 'Karibu'. 16-22 words."
+              instruction=f"Current welcome: '{prompts['welcome_prompt']}'. Avg likes {avg_likes}. Make warmer, inclusive for all tribes, convert visitor to follower. Must start with 'You are' and keep 'Kenyan Chair For All' and 'Karibu'."
             if should_evolve:
               print(f"EVOLVING {target} because: {reason}")
-              # Use llama first for builder to avoid reasoning bug
-              new_prompt=ask_groq(prompts["builder_prompt"], instruction, 350, prefer_llama=True)
-              if new_prompt and 30 < len(new_prompt) < 300:
+              new_prompt=ask_groq(prompts["builder_prompt"], instruction, 350)
+              if is_valid_prompt(new_prompt):
                 prompts[target]=new_prompt; prompts["last_evolution"]=f"Run {count}: {target} evolved"; prompts["evolution_reason"]=reason
                 print(f"EVOLVED {target} -> {new_prompt}")
+              else:
+                print(f"REJECTED invalid evolution: {new_prompt[:100]}")
+
           builder_agent()
           def ai_reply(txt, is_new=False):
             if is_new:
@@ -170,9 +195,9 @@ jobs:
             subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local']); subprocess.run(['git','add',mem_file,inbox_file,learn_file,users_file,prompt_file,perf_file])
             st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
             if st:
-              subprocess.run(['git','commit','-m',f'V5.2 perf {perf.get("avg_likes",0):.1f} likes run {prompts["evolution_count"]}'],check=True)
+              subprocess.run(['git','commit','-m',f'V5.3 heal perf {perf.get("avg_likes",0):.1f} run {prompts["evolution_count"]}'],check=True)
               subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{os.getenv("GITHUB_REPOSITORY")}.git','HEAD:main'],check=True)
-              print(f'Memory saved V5.2 run {prompts["evolution_count"]} perf {perf.get("avg_likes",0)}')
+              print(f'Memory saved V5.3 run {prompts["evolution_count"]} perf {perf.get("avg_likes",0)}')
             else:
               print('No new memory - clean')
           except Exception as e:
