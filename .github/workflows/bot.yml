@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V6.1 VIRAL FIXED
+      - name: V6.2 VIRAL FIXED
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -26,9 +26,15 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           import os,requests,json,random,subprocess,datetime,time
-          if os.path.exists('PAUSE.flag'): print("PAUSED - delete PAUSE.flag file"); exit(0)
+          if os.path.exists('PAUSE.flag'): print("PAUSED"); exit(0)
           gk=os.getenv('GROQ_API_KEY'); pt=os.getenv('FB_PAGE_ACCESS_TOKEN'); pid=os.getenv('FB_PAGE_ID'); gh=os.getenv('GH_TOKEN'); repo=os.getenv('REPO')
           mem_file='replied_comments.json'; learn_file='learned_topics.json'; users_file='known_users.json'; last_file='last_post.txt'
+          
+          # ENSURE FILES EXIST - THIS FIXES YOUR FATAL ERROR
+          for f in [mem_file, learn_file, users_file, last_file]:
+              if not os.path.exists(f):
+                  open(f,'w').write('[]' if f.endswith('.json') else '')
+          
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
           known=json.load(open(users_file)) if os.path.exists(users_file) else []
@@ -63,7 +69,6 @@ jobs:
               print(f"groq err {e}")
               return "Karibu sana! One Kenyan Chair For All, today this one is yours. Unajisikiaje leo 🪑?"
 
-          # POST - EVERY 3 HOURS EAT
           now_utc=datetime.datetime.utcnow()
           now_eat=now_utc+datetime.timedelta(hours=3)
           hour_key=now_eat.strftime('%Y-%m-%d-%H')
@@ -79,10 +84,7 @@ jobs:
             print(f"POSTED RESPONSE: {fb}")
             if 'id' in fb:
               open(last_file,'w').write(hour_key)
-            else:
-              print("POST FAILED - CHECK FB TOKEN")
 
-          # COMMENTS - MAX 5 PER RUN
           replied=0
           try:
             posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'limit':5}).json().get('data',[])
@@ -114,11 +116,12 @@ jobs:
             open(mem_file,'w').write(json.dumps(memory[-300:]))
             open(learn_file,'w').write(json.dumps(learned))
             open(users_file,'w').write(json.dumps(known[-500:]))
-            subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local'])
-            subprocess.run(['git','add',mem_file,learn_file,users_file,last_file])
+            subprocess.run(['git','config','user.name','bot'])
+            subprocess.run(['git','config','user.email','bot@real.local'])
+            subprocess.run(['git','add','-A'])
             st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
             if st:
-              subprocess.run(['git','commit','-m','V6.1 fix'],check=True)
+              subprocess.run(['git','commit','-m','V6.2 fix'],check=True)
               subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{repo}.git','HEAD:main'],check=True)
           except Exception as e:
             print(f'git: {e}')
