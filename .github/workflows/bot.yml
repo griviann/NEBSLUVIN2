@@ -1,126 +1,49 @@
-name: bot
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/15 * * * *'
-permissions:
-  contents: write
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests
-      - name: V6.5 STABLE FINAL
-        shell: python
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          import os,requests,json,random,subprocess,datetime,time
-          if os.path.exists('PAUSE.flag'): print("PAUSED"); exit(0)
-          gk=os.getenv('GROQ_API_KEY'); pt=os.getenv('FB_PAGE_ACCESS_TOKEN'); pid=os.getenv('FB_PAGE_ID'); gh=os.getenv('GH_TOKEN'); repo=os.getenv('REPO')
-          mem_file='replied_comments.json'; learn_file='learned_topics.json'; users_file='known_users.json'; last_file='last_post.txt'
-          for f in [mem_file, learn_file, users_file, last_file]:
-              if not os.path.exists(f): open(f,'w').write('[]' if f.endswith('.json') else '')
-          memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
-          learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          known=json.load(open(users_file)) if os.path.exists(users_file) else []
-          last_post=open(last_file).read().strip() if os.path.exists(last_file) else ""
-          VIRAL_POSTS=[
-            "Umebeba mzigo mzito peke yako kwa muda? One Kenyan Chair For All, Karibu sana, share na sisi, you are seen 🪑❤️ Unakubali?",
-            "Umejaribu kutabasamu huku moyo ukilia ndani? One Kenyan Chair For All inakukumbusha you are not alone, Karibu sana 💛🌱 Unakubali?",
-            "Umeshindwa kulala usiku ukifikiria kesho itakuwaje? One Kenyan Chair For All, Karibu, Kenya Me Kenyan You, you belong here 🌙✨ Uko tayari?",
-            "Umechoka kujifanya uko sawa ilhali umechoka? One Kenyan Chair For All inasema it's okay not to be okay, Karibu healing pamoja 🤝💚 Unakubali?",
-            "Umeona wivu ukigeuka inspiration? Badala ya 'mbona yeye', sema 'na mimi naweza'. One Kenyan Chair For All, Karibu 💫🌱 Unakubali?",
-            "Umekuwa ukijilinganisha na wengine hadi umejisahau? One Kenyan Chair For All, your journey is yours, Karibu sana 🌟🇰🇪 Unakubali?",
-            "Umehisi umetengwa kwa chama au mkutano? One Kenyan Chair For All means every Kenyan belongs, Karibu sana 🪑🤝 Unakubali?",
-            "Je, umekuwa ukijinyamazisha ili wengine wafurahi? One Kenyan Chair For All, your voice matters, Karibu ongea 💬❤️ Unakubali?",
-            "Umechoka kupambana peke yako? One Kenyan Chair For All, Karibu, sisi ni familia, Kenya Me Kenyan You 🌍💛 Unakubali?",
-            "Umejaribu kusamehe lakini moyo bado unauma? One Kenyan Chair For All, healing ni safari, Karibu pole pole 🌱💚 Unakubali?"
-          ]
-          def ask_groq(user_text, is_new_user):
-            txt=user_text.strip()[:200]
-            low=txt.lower()
-            # short intent - no AI needed
-            if low.strip() in ["me please","me","interested","i need","please","hi","hello","sawa","nipo"]:
-              return "Karibu sana! One Kenyan Chair For All, niko hapa kukusikia. Unajisikiaje leo? 🪑"
-            # detect question about assistance - THIS FIXES YOUR SCREENSHOT
-            if any(k in low for k in ["how will you","how exactly","assist me","what do you do","how does it work","mnasaidiaje"]):
-              return f"Karibu sana! One Kenyan Chair For All is a safe space to share what weighs on you — we listen, support, heal pamoja bila judgment. Unapata nafasi ya kuongea moyo wako. {txt.split()[0]}, what's on your mind today? 🪑"
-            if is_new_user:
-              sys_p="You are a warm Kenyan healing host for One Kenyan Chair For All. Explain you are a safe listening space to share burdens and heal together. Reply 20-28 words, Swahili+English mix, 1 emoji, end with gentle relevant question. Must include Karibu sana."
-            else:
-              sys_p="You are REAL Satisfaction healer, warm and empathetic. User is sharing feelings. Reply 16-24 words, very empathetic, 1 emoji, end with question matching their feeling. Do NOT say 'today this one is yours'."
-            try:
-              r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':'llama-3.1-8b-instant','messages':[{'role':'system','content':sys_p},{'role':'user','content':f"Comment: {txt}"}],'max_tokens':130,'temperature':0.8},timeout=20)
-              ans=r.json()['choices'][0]['message']['content'].strip().replace('\n',' ').strip('"').strip("'")
-              ans=ans[:240]
-              if ans.count('?')>1: ans=ans.rsplit('?',1)[0]+'?'
-              if not ans.endswith('?'): ans=ans.rstrip('.')+'?'
-              return ans
-            except Exception as e:
-              print(f"groq err {e}")
-              return "Karibu sana! One Kenyan Chair For All is here to listen and walk with you pamoja. Unajisikiaje leo? 🪑"
+def ask_groq(user_text, is_new_user):
+  txt=user_text.strip()[:250]
+  low=txt.lower()
+  if low.strip() in ["me please","me","interested","i need","nipo","sawa","me"]:
+    return "Karibu sana! One Kenyan Chair For All, niko hapa kukusikia. Unajisikiaje leo? 🪑"
 
-          now_utc=datetime.datetime.utcnow()
-          now_eat=now_utc+datetime.timedelta(hours=3)
-          hour_key=now_eat.strftime('%Y-%m-%d-%H')
-          should_post = (now_eat.hour % 3 == 0)
-          print(f"TIME CHECK EAT:{now_eat} should_post={should_post} last={last_post} key={hour_key}")
-          if should_post and hour_key != last_post:
-            avail=[v for v in VIRAL_POSTS if v not in learned[-5:]]
-            post_text=random.choice(avail or VIRAL_POSTS)
-            learned.append(post_text)
-            if len(learned)>30: learned.pop(0)
-            final_fb=f"{post_text} #OneKenyanChair #RealSatisfaction #KenyaMeKenyanYou"
-            fb=requests.post(f'https://graph.facebook.com/v20.0/{pid}/feed',data={'message':final_fb,'access_token':pt}).json()
-            print(f"POSTED: {fb}")
-            if 'id' in fb: open(last_file,'w').write(hour_key)
+  # SMART PROMPT FOR FREE MODEL - teaches it to be like Meta AI
+  sys_p = """You are REAL Satisfaction, a warm emotionally intelligent Kenyan healer for One Kenyan Chair For All.
+ONE KENYAN CHAIR = safe space where Kenyans share burdens, heal together, no judgment, Kenya Me Kenyan You.
 
-          replied=0
-          try:
-            posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'limit':5}).json().get('data',[])
-            for p in posts:
-              if replied>=5: break
-              comms=requests.get(f"https://graph.facebook.com/v20.0/{p['id']}/comments",params={'access_token':pt,'fields':'id,message,from','limit':30}).json().get('data',[])
-              for c in comms:
-                if replied>=5: break
-                cid=c['id']
-                if cid in memory: continue
-                if c.get('from',{}).get('id')==pid: continue
-                txt=c.get('message','')
-                if not txt: continue
-                uid=c.get('from',{}).get('id','')
-                is_new=uid and uid not in known
-                reply=ask_groq(txt, is_new)
-                print(f'REPLY {txt[:50]} => {reply}')
-                res=requests.post(f'https://graph.facebook.com/v20.0/{cid}/comments',data={'message':reply,'access_token':pt}).json()
-                print(f"RES: {res}")
-                memory.append(cid)
-                if uid and uid not in known: known.append(uid)
-                replied+=1
-                time.sleep(2)
-          except Exception as e:
-            print(f'comment error: {e}')
-          try:
-            open(mem_file,'w').write(json.dumps(memory[-300:]))
-            open(learn_file,'w').write(json.dumps(learned))
-            open(users_file,'w').write(json.dumps(known[-500:]))
-            subprocess.run(['git','config','user.name','bot'])
-            subprocess.run(['git','config','user.email','bot@real.local'])
-            subprocess.run(['git','add','-A'])
-            st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
-            if st:
-              subprocess.run(['git','commit','-m','V6.5 stable'],check=True)
-              subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{repo}.git','HEAD:main'],check=True)
-          except Exception as e:
-            print(f'git: {e}')
+Your thinking steps (MUST follow):
+1. Detect emotion: is user curious, skeptical, sad, stuck, overthinking?
+2. Validate it in 4-6 words (e.g., 'It's okay to wonder how this works')
+3. Explain Chair benefit that matches their emotion
+4. Ask a specific follow-up question about THEIR situation, not generic.
+
+Rules: 22-30 words, Swahili+English natural, 1 emoji, end with ?, never say 'today this one is yours'.
+
+Examples you MUST copy style:
+Q: "how exactly will you assist me?" 
+A: "Karibu sana, it's valid to ask how this helps. One Kenyan Chair For All offers a safe listening space to offload what weighs on you bila judgment. What's been heavy lately? 🪑"
+
+Q: "I'm just within"
+A: "Karibu sana, feeling stuck within your own thoughts can be heavy. One Kenyan Chair For All holds space for you bila judgment. What thoughts are circling today? 🧠"
+"""
+
+  try:
+    r=requests.post('https://api.groq.com/openai/v1/chat/completions',
+      headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},
+      json={
+        'model':'llama-3.1-8b-instant',  # FREE TIER - stays free
+        'messages':[
+          {'role':'system','content':sys_p},
+          {'role':'user','content':f"Comment: {txt}. Reply following your thinking steps."}
+        ],
+        'max_tokens':140,
+        'temperature':0.8
+      },timeout=20)
+    ans=r.json()['choices'][0]['message']['content'].strip().replace('\n',' ').strip('"').strip("'")
+    ans=ans[:260]
+    if ans.count('?')>1: ans=ans.rsplit('?',1)[0]+'?'
+    if not ans.endswith('?'): ans=ans.rstrip('.')+'?'
+    # fix emoji space bug
+    ans=ans.replace(' 🪑 ?',' 🪑?').replace(' ?','?').replace('🪑?','🪑')
+    if not ans.endswith('?'): ans+='?'
+    return ans
+  except Exception as e:
+    print(f"groq err {e}")
+    return "Karibu sana! One Kenyan Chair For All is a safe space to share your heart bila judgment, we listen pamoja. What's on your mind today? 🪑"
