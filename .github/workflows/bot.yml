@@ -111,47 +111,7 @@ jobs:
               subprocess.run(['git','commit','-m','V6.6 free smart'],check=True)
               subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{repo}.git','HEAD:main'],check=True)
           except Exception as e:
-            print(f'git: {e}')name: bot
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/15 * * * *'
-permissions:
-  contents: write
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests
-      - name: V6.6 FREE SMART
-        shell: python
-        env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          import os,requests,json,random,subprocess,datetime,time
-          if os.path.exists('PAUSE.flag'): print("PAUSED"); exit(0)
-          gk=os.getenv('GROQ_API_KEY'); pt=os.getenv('FB_PAGE_ACCESS_TOKEN'); pid=os.getenv('FB_PAGE_ID'); gh=os.getenv('GH_TOKEN'); repo=os.getenv('REPO')
-          mem_file='replied_comments.json'; learn_file='learned_topics.json'; users_file='known_users.json'; last_file='last_post.txt'
-          for f in [mem_file, learn_file, users_file, last_file]:
-              if not os.path.exists(f): open(f,'w').write('[]' if f.endswith('.json') else '')
-          memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
-          learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          known=json.load(open(users_file)) if os.path.exists(users_file) else []
-          last_post=open(last_file).read().strip() if os.path.exists(last_file) else ""
-          VIRAL_POSTS=[
-            "Umebeba mzigo mzito peke yako kwa muda? One Kenyan Chair For All, Karibu sana, share na sisi, you are seen 🪑❤️ Unakubali?",
-            "Umejaribu kutabasamu huku moyo ukilia ndani? One Kenyan Chair For All inakukumbusha you are not alone, Karibu sana 💛🌱 Unakubali?",
-            "Umeshindwa kulala usiku ukifikiria kesho itakuwaje? One Kenyan Chair For All, Karibu, Kenya Me Kenyan You, you belong here 🌙✨ Uko tayari?",
+            print(f'git: {e}')u, you belong here 🌙✨ Uko tayari?",
             "Umechoka kujifanya uko sawa ilhali umechoka? One Kenyan Chair For All inasema it's okay not to be okay, Karibu healing pamoja 🤝💚 Unakubali?",
             "Umeona wivu ukigeuka inspiration? Badala ya 'mbona yeye', sema 'na mimi naweza'. One Kenyan Chair For All, Karibu 💫🌱 Unakubali?",
             "Umekuwa ukijilinganisha na wengine hadi umejisahau? One Kenyan Chair For All, your journey is yours, Karibu sana 🌟🇰🇪 Unakubali?",
