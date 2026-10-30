@@ -16,22 +16,23 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests
-      - name: V5.9 VIRAL FIXED + FAST REPLY
+      - name: V6.1 VIRAL FIXED
         shell: python
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          import os,requests,re,json,random,subprocess,datetime
-          if os.path.exists('PAUSE.flag'): print("PAUSED"); exit(0)
-          gk=os.getenv('GROQ_API_KEY'); pt=os.getenv('FB_PAGE_ACCESS_TOKEN'); pid=os.getenv('FB_PAGE_ID'); gh=os.getenv('GH_TOKEN')
-          mem_file='replied_comments.json'; inbox_file='replied_inbox.json'; learn_file='learned_topics.json'; users_file='known_users.json'
+          import os,requests,json,random,subprocess,datetime,time
+          if os.path.exists('PAUSE.flag'): print("PAUSED - delete PAUSE.flag file"); exit(0)
+          gk=os.getenv('GROQ_API_KEY'); pt=os.getenv('FB_PAGE_ACCESS_TOKEN'); pid=os.getenv('FB_PAGE_ID'); gh=os.getenv('GH_TOKEN'); repo=os.getenv('REPO')
+          mem_file='replied_comments.json'; learn_file='learned_topics.json'; users_file='known_users.json'; last_file='last_post.txt'
           memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
-          inbox_mem=json.load(open(inbox_file)) if os.path.exists(inbox_file) else []
           learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
           known=json.load(open(users_file)) if os.path.exists(users_file) else []
+          last_post=open(last_file).read().strip() if os.path.exists(last_file) else ""
           
           VIRAL_POSTS=[
             "Umebeba mzigo mzito peke yako kwa muda? One Kenyan Chair For All, Karibu sana, share na sisi, you are seen 🪑❤️ Unakubali?",
@@ -47,55 +48,49 @@ jobs:
           ]
 
           def ask_groq(user_text, is_new_user):
-            # FIXED PROMPT - NO QUOTES INSTRUCTION
             if is_new_user:
               sys_p="You are warm Kenyan host for One Kenyan Chair For All. Reply 18-24 words, warm, Swahili+English mix, include 1 emoji, end with a gentle question. Must include 'Karibu sana' and 'One Kenyan Chair For All'."
             else:
               sys_p="You are REAL Satisfaction healer, warm, empathetic. Reply 16-22 words, 1 emoji, end with question. Short and healing."
-            # Fast path for Me please
             low=user_text.lower().strip()
             if low in ["me please","me","interested","i need","please","how","hi","hello","sawa"]:
               return "Karibu sana Haggai! One Kenyan Chair For All, today this one is yours. Niko hapa kukusikia, unahitaji nini leo 🪑?"
             try:
-              r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':'llama-3.1-8b-instant','messages':[{'role':'system','content':sys_p},{'role':'user','content':f"Reply to this comment: {user_text}"}],'max_tokens':150},timeout=20)
-              j=r.json()
-              raw=j['choices'][0]['message']['content'].strip()
-              # Clean quotes if model adds them
-              raw=raw.strip('"').strip("'")
+              r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':'llama-3.1-8b-instant','messages':[{'role':'system','content':sys_p},{'role':'user','content':f"Reply to: {user_text}"}],'max_tokens':150},timeout=20)
+              raw=r.json()['choices'][0]['message']['content'].strip().strip('"').strip("'")
               return raw[:250]
             except Exception as e:
               print(f"groq err {e}")
               return "Karibu sana! One Kenyan Chair For All, today this one is yours. Unajisikiaje leo 🪑?"
 
-          # CLEAN BAD POSTS
-          try:
-            posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'fields':'id,message','limit':10}).json().get('data',[])
-            for p in posts[:5]:
-              msg=(p.get('message') or '').lower()
-              if any(x in msg for x in ['use quotes','inside quotes','or \'umesh','20-26 words','instruction']):
-                print(f"DELETING BAD POST {p['id']}")
-                requests.delete(f"https://graph.facebook.com/v20.0/{p['id']}",params={'access_token':pt})
-          except Exception as e:
-            print(f"clean error {e}")
-
-          # POST - EVERY 3 HOURS ONLY
-          now=datetime.datetime.now()
-          should_post = (now.hour % 3 == 0 and now.minute < 15)
-          if should_post:
+          # POST - EVERY 3 HOURS EAT
+          now_utc=datetime.datetime.utcnow()
+          now_eat=now_utc+datetime.timedelta(hours=3)
+          hour_key=now_eat.strftime('%Y-%m-%d-%H')
+          should_post = (now_eat.hour % 3 == 0 and now_eat.minute < 20)
+          print(f"TIME CHECK UTC:{now_utc} EAT:{now_eat} should_post={should_post} last={last_post} current_key={hour_key}")
+          if should_post and hour_key != last_post:
             avail=[v for v in VIRAL_POSTS if v not in learned[-5:]]
             post_text=random.choice(avail or VIRAL_POSTS)
             learned.append(post_text)
             if len(learned)>30: learned.pop(0)
             final_fb=f"{post_text} #OneKenyanChair #RealSatisfaction #KenyaMeKenyanYou"
             fb=requests.post(f'https://graph.facebook.com/v20.0/{pid}/feed',data={'message':final_fb,'access_token':pt}).json()
-            print(f"POSTED: {fb}")
+            print(f"POSTED RESPONSE: {fb}")
+            if 'id' in fb:
+              open(last_file,'w').write(hour_key)
+            else:
+              print("POST FAILED - CHECK FB TOKEN")
 
-          # COMMENTS - RUN EVERY 15 MIN
+          # COMMENTS - MAX 5 PER RUN
+          replied=0
           try:
             posts=requests.get(f'https://graph.facebook.com/v20.0/{pid}/posts',params={'access_token':pt,'limit':5}).json().get('data',[])
             for p in posts:
+              if replied>=5: break
               comms=requests.get(f"https://graph.facebook.com/v20.0/{p['id']}/comments",params={'access_token':pt,'fields':'id,message,from','limit':20}).json().get('data',[])
               for c in comms:
+                if replied>=5: break
                 cid=c['id']
                 if cid in memory: continue
                 if c.get('from',{}).get('id')==pid: continue
@@ -104,27 +99,26 @@ jobs:
                 uid=c.get('from',{}).get('id','')
                 is_new=uid and uid not in known
                 reply=ask_groq(txt, is_new)
-                # Don't double add ?
-                if not reply.strip().endswith('?'):
-                  reply=reply.rstrip('.')+'?'
+                if not reply.strip().endswith('?'): reply=reply.rstrip('.')+'?'
                 print(f'REPLY {txt[:30]} => {reply}')
-                requests.post(f'https://graph.facebook.com/v20.0/{cid}/comments',data={'message':reply,'access_token':pt})
-                # Also send inbox for "Me please"
-                if txt.lower().strip() in ["me please","me","interested"]:
-                  try:
-                    requests.post(f'https://graph.facebook.com/v20.0/{pid}/messages',data={'recipient':f'{{"comment_id":"{cid}"}}','message':f'{{"text":"{reply} Check DM pia"}}','access_token':pt})
-                  except: pass
+                res=requests.post(f'https://graph.facebook.com/v20.0/{cid}/comments',data={'message':reply,'access_token':pt}).json()
+                print(f"REPLY RES: {res}")
                 memory.append(cid)
                 if uid and uid not in known: known.append(uid)
+                replied+=1
+                time.sleep(2)
           except Exception as e:
             print(f'comment error: {e}')
 
           try:
-            open(mem_file,'w').write(json.dumps(memory[-300:])); open(inbox_file,'w').write(json.dumps(inbox_mem[-300:])); open(learn_file,'w').write(json.dumps(learned)); open(users_file,'w').write(json.dumps(known[-500:]))
-            subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local']); subprocess.run(['git','add',mem_file,inbox_file,learn_file,users_file])
+            open(mem_file,'w').write(json.dumps(memory[-300:]))
+            open(learn_file,'w').write(json.dumps(learned))
+            open(users_file,'w').write(json.dumps(known[-500:]))
+            subprocess.run(['git','config','user.name','bot']); subprocess.run(['git','config','user.email','bot@real.local'])
+            subprocess.run(['git','add',mem_file,learn_file,users_file,last_file])
             st=subprocess.run(['git','status','--porcelain'],capture_output=True,text=True).stdout.strip()
             if st:
-              subprocess.run(['git','commit','-m',f'V5.9 fixed'],check=True)
-              subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{os.getenv("GITHUB_REPOSITORY")}.git','HEAD:main'],check=True)
+              subprocess.run(['git','commit','-m','V6.1 fix'],check=True)
+              subprocess.run(['git','push',f'https://x-access-token:{gh}@github.com/{repo}.git','HEAD:main'],check=True)
           except Exception as e:
             print(f'git: {e}')
