@@ -1,75 +1,34 @@
-name: bot
-on:
-  workflow_dispatch:
-  schedule:
-    - cron: '*/15 * * * *'
+name: test-keys
+on: workflow_dispatch
+
 permissions:
-  contents: write
+  contents: read
+
 jobs:
-  run:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install requests
-      - name: V6.7 FIXED SMART - WILL POST
-        shell: python
+      - run: |
+          python - << 'PY'
+          import os, requests
+          PAGE_ID = os.environ['PAGE_ID'].strip()
+          PAGE_TOKEN = os.environ['PAGE_TOKEN'].strip()
+          print(f"PAGE_ID length: {len(PAGE_ID)} value starts with: {PAGE_ID[:4]}...")
+          print(f"PAGE_TOKEN length: {len(PAGE_TOKEN)} starts with: {PAGE_TOKEN[:10]}...")
+          
+          # Test 1: Is Page ID valid?
+          r1 = requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}?fields=id,name,access_token&access_token={PAGE_TOKEN}", timeout=15).json()
+          print(f"TEST PAGE CHECK: {r1}")
+          
+          # Test 2: Can we read posts?
+          r2 = requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}/posts?limit=1&access_token={PAGE_TOKEN}", timeout=15).json()
+          print(f"TEST POSTS READ: {r2}")
+          
+          # Test 3: Can we still post? (we won't actually post, just check permission)
+          # If r1 has error code 190 = token expired. If error 100 subcode 33 = PAGE_ID wrong
+          if 'error' in r1:
+              print(f"ERROR CODE: {r1['error'].get('code')} SUBCODE: {r1['error'].get('error_subcode')} MESSAGE: {r1['error'].get('message')}")
+          PY
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          import os,requests,json,random,subprocess,datetime,time
-          print("=== REAL SATISFACTION V6.7 START ===")
-          if os.path.exists('PAUSE.flag'):
-              os.remove('PAUSE.flag')
-              print("Removed PAUSE.flag - resuming!")
-          
-          gk=os.getenv('GROQ_API_KEY'); pt=os.getenv('FB_PAGE_ACCESS_TOKEN'); pid=os.getenv('FB_PAGE_ID'); gh=os.getenv('GH_TOKEN'); repo=os.getenv('REPO')
-          mem_file='replied_comments.json'; learn_file='learned_topics.json'; users_file='known_users.json'; last_file='last_post.txt'
-          for f in [mem_file, learn_file, users_file, last_file]:
-              if not os.path.exists(f): open(f,'w').write('[]' if f.endswith('.json') else '')
-          memory=json.load(open(mem_file)) if os.path.exists(mem_file) else []
-          learned=json.load(open(learn_file)) if os.path.exists(learn_file) else []
-          known=json.load(open(users_file)) if os.path.exists(users_file) else []
-          last_post=open(last_file).read().strip() if os.path.exists(last_file) else ""
-          
-          VIRAL_POSTS=[
-            "Umebeba mzigo mzito peke yako kwa muda? One Kenyan Chair For All, Karibu sana, share na sisi, you are seen 🪑❤️ Unakubali?",
-            "Umejaribu kutabasamu huku moyo ukilia ndani? One Kenyan Chair For All inakukumbusha you are not alone, Karibu sana 💛🌱 Unakubali?",
-            "Umeshindwa kulala usiku ukifikiria kesho itakuwaje? One Kenyan Chair For All, Karibu, Kenya Me Kenyan You, you belong here 🌙✨ Uko tayari?",
-            "Umechoka kujifanya uko sawa ilhali umechoka? One Kenyan Chair For All inasema it's okay not to be okay, Karibu healing pamoja 🤝💚 Unakubali?",
-            "Umeona wivu ukigeuka inspiration? Badala ya 'mbona yeye', sema 'na mimi naweza'. One Kenyan Chair For All, Karibu 💫🌱 Unakubali?",
-            "Umekuwa ukijilinganisha na wengine hadi umejisahau? One Kenyan Chair For All, your journey is yours, Karibu sana 🌟🇰🇪 Unakubali?",
-            "Umehisi umetengwa kwa chama au mkutano? One Kenyan Chair For All means every Kenyan belongs, Karibu sana 🪑🤝 Unakubali?",
-            "Je, umekuwa ukijinyamazisha ili wengine wafurahi? One Kenyan Chair For All, your voice matters, Karibu ongea 💬❤️ Unakubali?",
-            "Umechoka kupambana peke yako? One Kenyan Chair For All, Karibu, sisi ni familia, Kenya Me Kenyan You 🌍💛 Unakubali?",
-            "Umejaribu kusamehe lakini moyo bado unauma? One Kenyan Chair For All, healing ni safari, Karibu pole pole 🌱💚 Unakubali?"
-          ]
-          
-          def ask_groq(user_text, is_new_user):
-            txt=user_text.strip()[:250]
-            low=txt.lower()
-            if low.strip() in ["me please","me","interested","i need","nipo","sawa"]:
-              return "Karibu sana! One Kenyan Chair For All, niko hapa kukusikia. Unajisikiaje leo? 🪑"
-            sys_p = """You are REAL Satisfaction, a warm emotionally intelligent Kenyan healer for One Kenyan Chair For All. ONE KENYAN CHAIR = safe space where Kenyans share burdens, heal together, no judgment. Your thinking: 1) Detect emotion 2) Validate it 3) Explain Chair benefit 4) Ask follow-up. Rules: 22-30 words, Swahili+English natural, 1 emoji, end with ?, never say 'today this one is yours'."""
-            try:
-              r=requests.post('https://api.groq.com/openai/v1/chat/completions',headers={'Authorization':f'Bearer {gk}','Content-Type':'application/json'},json={'model':'llama-3.1-8b-instant','messages':[{'role':'system','content':sys_p},{'role':'user','content':f"Comment: {txt}"}],'max_tokens':140,'temperature':0.8},timeout=20)
-              ans=r.json()['choices'][0]['message']['content'].strip()[:260]
-              if not ans.endswith('?'): ans=ans.rstrip('.')+'?'
-              return ans
-            except Exception as e:
-              print(f"groq err {e}")
-              return "Karibu sana! One Kenyan Chair For All is a safe space to share your heart bila judgment, we listen pamoja. What's on your mind today? 🪑"
-
-          now_utc=datetime.datetime.utcnow()
-          now_eat=now_utc+datetime.timedelta(hours=3)
-          hour_key=now_eat.strftime('%Y-%m-%d-%H')
-          print(f"Time EAT: {now_eat}, last_post: {last_post}, hour: {now_eat.hour}")
-          
-          # CHANGE 2 TO 1 IF YOU WANT EVERY HOUR
-          should_post = (now_eat.hour % 2 
+          PAGE_ID: ${{ secrets.PAGE_ID }}
+          PAGE_TOKEN: ${{ secrets.PAGE_TOKEN }}
