@@ -1,34 +1,110 @@
-name: test-keys
-on: workflow_dispatch
+name: bot
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  test:
+  run:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
       - run: |
           python - << 'PY'
-          import os, requests
+          import os, json, random, time, requests
+          from datetime import datetime, timezone, timedelta
+
           PAGE_ID = os.environ['PAGE_ID'].strip()
           PAGE_TOKEN = os.environ['PAGE_TOKEN'].strip()
-          print(f"PAGE_ID length: {len(PAGE_ID)} value starts with: {PAGE_ID[:4]}...")
-          print(f"PAGE_TOKEN length: {len(PAGE_TOKEN)} starts with: {PAGE_TOKEN[:10]}...")
-          
-          # Test 1: Is Page ID valid?
-          r1 = requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}?fields=id,name,access_token&access_token={PAGE_TOKEN}", timeout=15).json()
-          print(f"TEST PAGE CHECK: {r1}")
-          
-          # Test 2: Can we read posts?
-          r2 = requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}/posts?limit=1&access_token={PAGE_TOKEN}", timeout=15).json()
-          print(f"TEST POSTS READ: {r2}")
-          
-          # Test 3: Can we still post? (we won't actually post, just check permission)
-          # If r1 has error code 190 = token expired. If error 100 subcode 33 = PAGE_ID wrong
-          if 'error' in r1:
-              print(f"ERROR CODE: {r1['error'].get('code')} SUBCODE: {r1['error'].get('error_subcode')} MESSAGE: {r1['error'].get('message')}")
+          GROQ_KEY = os.environ['GROQ_API_KEY'].strip()
+          GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+          EAT = timezone(timedelta(hours=3))
+          now_eat = datetime.now(EAT)
+          should_post = now_eat.hour % 2 == 0 and now_eat.minute < 15
+
+          def load_json(name, default):
+              try:
+                  with open(name) as f:
+                      return json.load(f)
+              except:
+                  return default
+
+          replied = set(load_json("replied_comments.json", []))
+          users = load_json("known_users.json", {})
+
+          def save():
+              with open("replied_comments.json","w") as f:
+                  json.dump(list(replied), f)
+              with open("known_users.json","w") as f:
+                  json.dump(users, f)
+
+          def ask_groq(user_text, name):
+              txt = user_text.strip()[:300]
+              prompt = f"You are REAL Satisfaction, warm Kenyan healer. User {name} said: {txt}. Reply warm 20 words, 1 emoji max, end with soft question."
+              try:
+                  r = requests.post(GROQ_URL, headers={"Authorization": f"Bearer {GROQ_KEY}","Content-Type":"application/json"}, json={"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":prompt}],"temperature":0.8,"max_tokens":100}, timeout=20)
+                  if r.status_code==200:
+                      return r.json()['choices'][0]['message']['content'].strip()[:220]
+              except:
+                  pass
+              return f"Karibu sana {name}, niko hapa. Take a breath, what is heavy today? 🤝"
+
+          if should_post:
+              msg = random.choice(["One Kenyan Chair For All 🪑 Sometimes you just need a place to breathe. What are you carrying?", "Karibu One Kenyan Chair For All 🌙 Usiku mrefu? Come sit, you don't have to be okay to be welcome."])
+              r = requests.post(f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed", data={"message": msg, "access_token": PAGE_TOKEN}, timeout=15)
+              print(r.json())
+
+          print("Checking posts")
+          try:
+              resp = requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}/posts?limit=5&access_token={PAGE_TOKEN}", timeout=15).json()
+              print(f"RAW: {resp}")
+              posts = resp.get('data',[])
+              print(f"Found {len(posts)} posts")
+              count = 0
+              for p in posts:
+                  if count>=5:
+                      break
+                  pid = p['id']
+                  comms = requests.get(f"https://graph.facebook.com/v19.0/{pid}/comments?limit=30&access_token={PAGE_TOKEN}", timeout=15).json().get('data',[])
+                  for c in comms:
+                      cid = c['id']
+                      if cid in replied:
+                          continue
+                      text = c.get('message','')
+                      if not text or len(text.strip())<2:
+                          continue
+                      from_id = c.get('from',{}).get('id','')
+                      from_name = c.get('from',{}).get('name','rafiki')
+                      reply_text = ask_groq(text, from_name.split()[0])
+                      rr = requests.post(f"https://graph.facebook.com/v19.0/{cid}/comments", data={"message": reply_text, "access_token": PAGE_TOKEN}, timeout=15)
+                      if rr.status_code==200:
+                          print(f"Replied: {reply_text}")
+                          replied.add(cid)
+                          users[from_id]=from_name
+                          save()
+                          count+=1
+                          time.sleep(2)
+                      if count>=5:
+                          break
+          except Exception as e:
+              print(f"Error {e}")
+          save()
           PY
         env:
           PAGE_ID: ${{ secrets.PAGE_ID }}
           PAGE_TOKEN: ${{ secrets.PAGE_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      - run: |
+          git config user.name "bot"
+          git config user.email "bot@bot.com"
+          git add replied_comments.json known_users.json || true
+          git diff --staged --quiet || git commit -m "update memory"
+          git push || true
