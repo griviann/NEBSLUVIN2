@@ -18,68 +18,132 @@ jobs:
           python - << 'PY'
           import os, json, random, time, requests
           from datetime import datetime, timezone, timedelta
-          PAGE_ID = os.environ['PAGE_ID'].strip()
-          PAGE_TOKEN = os.environ['PAGE_TOKEN'].strip()
-          GROQ_KEY = os.environ['GROQ_API_KEY'].strip()
+
+          PAGE_ID = os.environ.get('PAGE_ID','').strip()
+          PAGE_TOKEN = os.environ.get('PAGE_TOKEN','').strip()
+          GROQ_KEY = os.environ.get('GROQ_API_KEY','').strip()
+
+          if not PAGE_ID or not PAGE_TOKEN or not GROQ_KEY:
+              print("Missing secret, stopping")
+              exit(0)
+
           print(f"PAGE_ID len={len(PAGE_ID)} PAGE_TOKEN len={len(PAGE_TOKEN)}")
           EAT = timezone(timedelta(hours=3))
           now = datetime.now(EAT)
-          should_post = now.hour % 2 == 0 and now.minute < 15
+
+          # Post only once per 2 hours, not 3 times
+          should_post = (now.hour % 2 == 0 and now.minute < 5)
+
           def load_json(n,d):
             try:
               with open(n) as f:
                 return json.load(f)
             except:
               return d
+
           replied=set(load_json("replied_comments.json",[]))
-          users=load_json("known_users.json",{})
+          known_users=load_json("known_users.json",{})
+
           def save():
             with open("replied_comments.json","w") as f:
               json.dump(list(replied),f)
             with open("known_users.json","w") as f:
-              json.dump(users,f)
+              json.dump(known_users,f)
+
           def ask_groq(txt,name):
+            # --- YOUR 5 RULES OF EFFECTIVE COMMUNICATION ---
+            is_returning = name in known_users
+            visits = known_users.get(name, 0)
+
+            system_prompt = f"""
+            You are REAL Satisfaction, a warm Kenyan healer. Not a bot, a human listener.
+
+            COMMUNICATION THEORY - Follow strictly:
+            1. LEARNER: {name} has visited {visits} times. {'This is a returning soul, welcome warmly' if is_returning else 'New soul, welcome gently'}.
+            2. LISTENER: First acknowledge what they said: "{txt}" - reflect it.
+            3. DECODER: Decode true feeling behind words. If Sheng/Swahili, understand emotion.
+            4. DYNAMIC ADAPTIVE: Mirror their language. They used Sheng -> reply Sheng. English -> English. Swahili -> Swahili. Match energy.
+            5. INTERPERSONAL: Show empathy, warmth, respect. Encoder: reply warm, 25 words max, 1 emoji only.
+            6. Do NOT sell, preach, or give advice unless asked. Just sit with them.
+
+            Human said: {txt}
+            Reply now as REAL Satisfaction:
+            """
+
             try:
-              r=requests.post("https://api.groq.com/openai/v1/chat/completions", headers={"Authorization": f"Bearer {GROQ_KEY}","Content-Type":"application/json"}, json={"model":"llama-3.3-70b-versatile","messages":[{"role":"user","content":f"You are REAL Satisfaction, warm Kenyan healer. {name} said: {txt}. Reply 20 words warm, 1 emoji."}],"temperature":0.85,"max_tokens":100}, timeout=20)
+              r=requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_KEY}","Content-Type":"application/json"},
+                json={
+                  "model":"llama-3.3-70b-versatile",
+                  "messages":[{"role":"system","content":system_prompt}],
+                  "temperature":0.82,
+                  "max_tokens":120
+                },
+                timeout=25
+              )
               if r.status_code==200:
-                return r.json()['choices'][0]['message']['content'].strip()[:220]
+                ans = r.json()['choices'][0]['message']['content'].strip()
+                return ans[:240]  # safe length
+              else:
+                print(f"Groq {r.status_code} {r.text[:200]}")
             except Exception as e:
               print(f"Groq err {e}")
-            return f"Karibu sana {name}, niko hapa. What is heavy today? 🤝"
+
+            # Fallback - also adaptive
+            if len(txt) > 30:
+              return f"Nimesikia {name}, maneno yako ni mazito. Niko hapa pamoja na wewe, pole pole tu. 🤝"
+            return f"Karibu sana {name}, niko hapa. Unabeba nini leo? 🤝"
+
+          # 1. POST if time
           if should_post:
-            requests.post(f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed", data={"message":"One Kenyan Chair For All 🪑 Sometimes you just need a place to breathe. What are you carrying today? 💛","access_token":PAGE_TOKEN})
-          posts=requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed?limit=5&access_token={PAGE_TOKEN}").json().get('data',[])
+            msg = random.choice([
+              "One Kenyan Chair For All 🪑 Sometimes you just need a place to breathe. What are you carrying today? 💛",
+              "Leo hakuna haraka. Keti tu. Unabeba nini moyoni? 🪑",
+              "Real Satisfaction is listening, not fixing. Niko hapa. 💛"
+            ])
+            try:
+              requests.post(f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed", data={"message":msg,"access_token":PAGE_TOKEN}, timeout=20)
+              print("Posted chair")
+            except Exception as e:
+              print(f"Post err {e}")
+
+          # 2. REPLY to comments - with real listening
+          try:
+            posts=requests.get(f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed?limit=5&access_token={PAGE_TOKEN}", timeout=20).json().get('data',[])
+          except:
+            posts=[]
+
           print(f"Found {len(posts)} posts")
           c=0
           for p in posts:
             if c>=5:
               break
-            for comm in requests.get(f"https://graph.facebook.com/v19.0/{p['id']}/comments?limit=20&access_token={PAGE_TOKEN}").json().get('data',[]):
+            try:
+              comms=requests.get(f"https://graph.facebook.com/v19.0/{p['id']}/comments?limit=20&access_token={PAGE_TOKEN}", timeout=20).json().get('data',[])
+            except:
+              comms=[]
+            for comm in comms:
+              if c>=5:
+                break
               if comm['id'] in replied:
                 continue
               if comm.get('from',{}).get('id')==PAGE_ID:
                 continue
-              txt=comm.get('message','')
-              if len(txt)<2:
+              txt=comm.get('message','').strip()
+              if len(txt)<2 or len(txt)>500:
                 continue
-              name=comm.get('from',{}).get('name','rafiki').split()[0]
+              name=comm.get('from',{}).get('name','rafiki').split()[0][:20]
+
               reply=ask_groq(txt,name)
-              if requests.post(f"https://graph.facebook.com/v19.0/{comm['id']}/comments", data={"message":reply,"access_token":PAGE_TOKEN}).status_code==200:
-                replied.add(comm['id'])
-                save()
-                c+=1
-                time.sleep(2)
-              if c>=5:
-                break
-          save()
-          PY
-        env:
-          PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          PAGE_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      - run: |
-          git config user.name "bot"
-          git config user.email "bot@bot.com"
-          git add replied_comments.json known_users.json || true
-          git diff --staged --quiet || git commit -m "update memory"
-          git push || true
+
+              try:
+                ok=requests.post(f"https://graph.facebook.com/v19.0/{comm['id']}/comments", data={"message":reply,"access_token":PAGE_TOKEN}, timeout=20)
+                if ok.status_code==200:
+                  replied.add(comm['id'])
+                  known_users[name] = known_users.get(name, 0) + 1
+                  save()
+                  c+=1
+                  print(f"Replied to {name}: {reply[:40]}")
+                  time.sleep(3)
+             
