@@ -9,85 +9,76 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Reply - Fixed No Duplicate + OpenRouter Backup
+      - name: Reply to comments - Fixed
         env:
-          PAGE_TOKEN: ${{ secrets.PAGE_TOKEN }}
-          PAGE_ID: ${{ secrets.PAGE_ID }}
-          GROQ_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENROUTER_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           python3 - << 'PY'
           import requests, os, time
-          PAGE_ID = os.getenv("PAGE_ID","").strip()
-          PAGE_TOKEN = os.getenv("PAGE_TOKEN","").strip()
-          GROQ_KEY = os.getenv("GROQ_KEY","").strip()
-          OPENROUTER_KEY = os.getenv("OPENROUTER_KEY","").strip()
+          PAGE_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN","").strip()
+          PAGE_ID = os.getenv("FB_PAGE_ID","").strip()
+          GROQ_KEY = os.getenv("GROQ_API_KEY","").strip()
+          OPENROUTER_KEY = os.getenv("OPEN_ROUTER_API_KEY","").strip()
 
-          print(f"Checking PAGE_ID: {PAGE_ID}")
+          print(f"Token len: {len(PAGE_TOKEN)}")
+          print(f"Page ID: {PAGE_ID}")
+          print(f"Groq len: {len(GROQ_KEY)}")
+          print(f"OpenRouter len: {len(OPENROUTER_KEY)}")
 
-          # 1. GET POSTS - FIXED
+          # If PAGE_ID empty, auto-find from token
+          if not PAGE_ID or " " in PAGE_ID:
+              me = requests.get(f"https://graph.facebook.com/v19.0/me?access_token={PAGE_TOKEN}").json()
+              print(f"Auto-find: {me}")
+              PAGE_ID = me.get("id","")
+          
+          print(f"Using PAGE_ID: {PAGE_ID}")
+
           url = f"https://graph.facebook.com/v19.0/{PAGE_ID}/feed?limit=3&access_token={PAGE_TOKEN}"
           res = requests.get(url).json()
           if "error" in res:
               print(f"FB Error: {res['error']}")
               exit(0)
           posts = res.get("data", [])
-          print(f"Found {len(posts)} posts - OK")
+          print(f"Found {len(posts)} posts - SUCCESS!")
 
           PROMPT = "You are REAL satisfaction Kenyan Chair, warm healing Sheng mix. Chair=mahali pa kupumua bila kuhukumiwa. Pole pole, karibu sana. Reply 50 words max warm. Comment: {c} Name: {n}"
 
-          def get_ai_reply(comment_text, name):
-              prompt = PROMPT.format(c=comment_text, n=name)
-              # Try GROQ first
+          def get_reply(c, n):
+              pr = PROMPT.format(c=c, n=n)
               try:
                   r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                       headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-                      json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": prompt}], "max_tokens": 120}, timeout=15)
+                      json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": pr}], "max_tokens": 120}, timeout=15)
                   r.raise_for_status()
-                  print("-> Groq used")
+                  print("Groq ok")
                   return r.json()['choices'][0]['message']['content']
               except Exception as e:
-                  print(f"Groq failed: {e}")
-                  # Backup OPENROUTER - FIXED HEADERS
-                  try:
-                      r2 = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                          headers={
-                              "Authorization": f"Bearer {OPENROUTER_KEY}",
-                              "Content-Type": "application/json",
-                              "HTTP-Referer": "https://github.com",
-                              "X-Title": "REAL Chair Healer"
-                          },
-                          json={"model": "meta-llama/llama-3.1-8b-instruct:free", "messages": [{"role": "user", "content": prompt}]},
-                          timeout=25)
-                      r2.raise_for_status()
-                      print("-> OpenRouter backup used")
-                      return r2.json()['choices'][0]['message']['content']
-                  except Exception as e2:
-                      print(f"OpenRouter also failed: {e2} - {r2.text if 'r2' in locals() else ''}")
-                      return None
+                  print(f"Groq fail {e}")
+                  r2 = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                      headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json", "HTTP-Referer": "https://github.com", "X-Title": "REAL Chair"},
+                      json={"model": "meta-llama/llama-3.1-8b-instruct:free", "messages": [{"role": "user", "content": pr}]}, timeout=25)
+                  print(f"OpenRouter status {r2.status_code}")
+                  return r2.json()['choices'][0]['message']['content']
 
           for post in posts:
               pid = post['id']
               c_url = f"https://graph.facebook.com/v19.0/{pid}/comments?order=reverse_chronological&fields=id,message,from,comments{{from}}&limit=50&access_token={PAGE_TOKEN}"
               comms = requests.get(c_url).json().get('data', [])
-              print(f"Post {pid} has {len(comms)} comments")
+              print(f"Post {pid} -> {len(comms)} comments")
               for c in comms:
-                  txt = c.get('message','')
-                  name = c.get('from',{}).get('name','')
-                  cid = c['id']
-                  replies = c.get('comments',{}).get('data',[])
-                  if any(rep.get('from',{}).get('id')==PAGE_ID for rep in replies):
-                      print(f"Skip {name} - already replied")
+                  txt=c.get('message',''); name=c.get('from',{}).get('name',''); cid=c['id']; reps=c.get('comments',{}).get('data',[])
+                  if any(rep.get('from',{}).get('id')==PAGE_ID for rep in reps):
+                      print(f"Skip {name} already replied")
                       continue
-                  if not txt or c.get('from',{}).get('id')==PAGE_ID:
-                      continue
+                  if not txt or c.get('from',{}).get('id')==PAGE_ID: continue
                   print(f"Replying to {name}: {txt[:40]}")
-                  reply = get_ai_reply(txt, name)
-                  if not reply: 
-                      print("No AI reply, skip")
-                      continue
+                  reply=get_reply(txt,name)
+                  if not reply: continue
                   requests.post(f"https://graph.facebook.com/v19.0/{cid}/comments", data={"message": reply, "access_token": PAGE_TOKEN})
                   print(f"REPLIED to {name}")
                   time.sleep(4)
-          print("Done - success")
+          print("Done")
           PY
