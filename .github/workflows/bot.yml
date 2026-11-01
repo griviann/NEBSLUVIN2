@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Reply to comments - Fixed Models 2026
+      - name: Reply to comments - FINAL GENERIC
         env:
           FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
@@ -17,7 +17,7 @@ jobs:
           OPEN_ROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
         run: |
           python3 - << 'PY'
-          import requests, os, time
+          import requests, os, time, json
           PAGE_TOKEN = os.getenv("FB_PAGE_ACCESS_TOKEN","").strip()
           PAGE_ID = os.getenv("FB_PAGE_ID","").strip()
           GROQ_KEY = os.getenv("GROQ_API_KEY","").strip()
@@ -33,41 +33,43 @@ jobs:
           posts = res.get("data", [])
           print(f"Found {len(posts)} posts")
 
-          PROMPT = "You are REAL satisfaction Kenyan Chair, warm healing Sheng mix. Chair=mahali pa kupumua bila kuhukumiwa. Pole pole, karibu sana. Reply 50 words max warm, not salesy. Comment: {c} Name: {n}"
+          def get_reply(comment_text, person_name="rafiki"):
+              # Generic prompt works for ANY name - John, Wilikister, Nebert, anyone
+              pr = f"You are REAL satisfaction Kenyan Chair, warm healing Sheng mix. Chair=mahali pa kupumua bila kuhukumiwa. Pole pole, karibu sana. Reply to {person_name} warmly in 2 lines max, not salesy. Comment: {comment_text}"
 
-          def get_reply(c, n):
-              pr = PROMPT.format(c=c, n=n)
-              # Try Groq with NEW 2026 model
+              # Try Groq with NEW 2026 model - robust parsing
               try:
                   r = requests.post("https://api.groq.com/openai/v1/chat/completions",
                       headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-                      json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": pr}], "max_tokens": 120}, timeout=20)
+                      json={"model": "openai/gpt-oss-20b", "messages": [{"role": "user", "content": pr}], "max_tokens": 300, "temperature": 0.7}, timeout=20)
                   print(f"Groq status {r.status_code}")
-                  if r.status_code==200:
-                      return r.json()['choices'][0]['message']['content']
-                  print(f"Groq body {r.text[:200]}")
+                  j = r.json()
+                  if r.status_code==200 and 'choices' in j:
+                      content = j['choices'][0].get('message',{}).get('content','')
+                      if content and len(content.strip())>5:
+                          return content.strip()
+                      print(f"Groq content empty, full: {json.dumps(j)[:400]}")
+                  else:
+                      print(f"Groq body {str(j)[:300]}")
               except Exception as e:
                   print(f"Groq fail {e}")
 
-              # Try OpenRouter with current free model
+              # Try OpenRouter generic
               try:
                   r2 = requests.post("https://openrouter.ai/api/v1/chat/completions",
                       headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json", "HTTP-Referer": "https://github.com", "X-Title": "REAL Chair"},
-                      json={"model": "meta-llama/llama-3.1-8b-instruct:free", "messages": [{"role": "user", "content": pr}]}, timeout=25)
+                      json={"model": "meta-llama/llama-3.1-8b-instruct:free", "messages": [{"role": "user", "content": pr}], "max_tokens": 300}, timeout=25)
                   print(f"OpenRouter status {r2.status_code}")
                   if r2.status_code==200:
-                      return r2.json()['choices'][0]['message']['content']
-                  # fallback model
-                  r3 = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                      headers={"Authorization": f"Bearer {OPENROUTER_KEY}", "Content-Type": "application/json"},
-                      json={"model": "openai/gpt-oss-20b:free", "messages": [{"role": "user", "content": pr}]}, timeout=25)
-                  print(f"OpenRouter fallback status {r3.status_code}")
-                  if r3.status_code==200:
-                      return r3.json()['choices'][0]['message']['content']
-                  print(f"OpenRouter body {r2.text[:200]}")
+                      j2 = r2.json()
+                      c2 = j2['choices'][0].get('message',{}).get('content','')
+                      if c2 and len(c2.strip())>5:
+                          return c2.strip()
               except Exception as e2:
                   print(f"OpenRouter fail {e2}")
-              return None
+
+              # FINAL GENERIC FALLBACK - works for ANY name, not just Wilikister
+              return f"Karibu sana {person_name}! REAL ni chair - mahali pa kupumua bila kuhukumiwa. Tunakusikia na tunajali. Pole pole, uko salama hapa. 💚"
 
           for post in posts:
               pid = post['id']
@@ -75,18 +77,16 @@ jobs:
               comms = requests.get(c_url).json().get('data', [])
               print(f"Post {pid} -> {len(comms)} comments")
               for c in comms:
-                  txt=c.get('message',''); name=c.get('from',{}).get('name',''); cid=c['id']; reps=c.get('comments',{}).get('data',[])
+                  txt=c.get('message',''); name=c.get('from',{}).get('name','') or "rafiki"; cid=c['id']; reps=c.get('comments',{}).get('data',[])
                   if any(rep.get('from',{}).get('id')==PAGE_ID for rep in reps): 
                       print(f"Skip {name} already replied")
                       continue
                   if not txt or c.get('from',{}).get('id')==PAGE_ID: continue
-                  print(f"Replying to {name}: {txt[:40]}")
-                  reply=get_reply(txt,name)
-                  if not reply:
-                      print("No reply generated")
-                      continue
-                  r = requests.post(f"https://graph.facebook.com/v19.0/{cid}/comments", data={"message": reply, "access_token": PAGE_TOKEN})
-                  print(f"REPLIED to {name}: {r.status_code} {r.text[:100]}")
+                  print(f"Replying to {name}: {txt[:60]}")
+                  reply=get_reply(txt, name)
+                  print(f"Final reply to post: {reply[:120]}")
+                  rr = requests.post(f"https://graph.facebook.com/v19.0/{cid}/comments", data={"message": reply, "access_token": PAGE_TOKEN})
+                  print(f"REPLIED to {name}: {rr.status_code} {rr.text[:150]}")
                   time.sleep(4)
-          print("Done")
+          print("Done - generic for all future comments")
           PY
